@@ -1,6 +1,10 @@
 node_modules
+web/node_modules
+web/dist
+web/.angular
 npm-debug.log
 .git
 .terraform
 *.tfstate*
 .DS_Store
+public

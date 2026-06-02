@@ -1,9 +1,14 @@
 // ShopNow — Cart microservice
-// Owns the Redis store (database-per-service). Handles the shopping cart and a
-// page-visit counter. It knows nothing about Postgres or the products schema.
+// Owns the Redis store (database-per-service). In the "full" app the cart is
+// PER-USER: the caller's identity comes from the JWT minted by the Products/core
+// API (shared JWT_SECRET), and each user's cart is a Redis hash keyed by user id.
+// Each hash field is a productId; its value is the JSON line item (with qty).
+// This service still knows nothing about Postgres or the product schema — the
+// frontend passes the product snapshot (name/price/icon) when adding to cart.
 
 const express = require("express");
 const { createClient } = require("redis");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 app.disable("x-powered-by");
@@ -12,7 +17,10 @@ const PORT = process.env.PORT || 5002;
 
 const REDIS_HOST = process.env.REDIS_HOST || "redis";
 const REDIS_PORT = process.env.REDIS_PORT || 6379;
-const CART_KEY = "shopnow:cart";
+const JWT_SECRET = process.env.JWT_SECRET || "shopnow_dev_secret_change_me";
+
+const who = () => process.env.HOSTNAME || "unknown";
+const cartKey = (userId) => `shopnow:cart:${userId}`;
 
 let redisClient;
 (async () => {
@@ -26,17 +34,33 @@ let redisClient;
   }
 })();
 
-const who = () => process.env.HOSTNAME || "unknown";
+// Require a valid Bearer token; attach req.user (so carts are per-account).
+function authRequired(req, res, next) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "authentication required" });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: "invalid or expired token" });
+  }
+}
 
-// Helper: return the full cart state in one shape.
-async function cartState() {
-  const items = await redisClient.lRange(CART_KEY, 0, -1);
-  return { servedBy: who(), items, count: items.length };
+// Read the full cart for a user and compute count + subtotal.
+async function cartState(userId) {
+  const map = await redisClient.hGetAll(cartKey(userId));
+  const items = Object.values(map)
+    .map((v) => JSON.parse(v))
+    .sort((a, b) => a.productId - b.productId);
+  const count = items.reduce((s, it) => s + it.qty, 0);
+  const subtotal = items.reduce((s, it) => s + Number(it.price) * it.qty, 0);
+  return { servedBy: who(), items, count, subtotal: Number(subtotal.toFixed(2)) };
 }
 
 app.get("/health", (_req, res) => res.json({ status: "ok", service: "cart" }));
 
-// Page-visit counter.
+// Page-visit counter (global, no auth) — kept from the original demo.
 app.get("/api/visits", async (_req, res) => {
   try {
     const visits = await redisClient.incr("shopnow:visits");
@@ -46,42 +70,74 @@ app.get("/api/visits", async (_req, res) => {
   }
 });
 
-// Current cart contents (full item list + count).
-app.get("/api/cart", async (_req, res) => {
+// Current cart for the authenticated user.
+app.get("/api/cart", authRequired, async (req, res) => {
   try {
-    res.json(await cartState());
+    res.json(await cartState(req.user.sub));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// Add an item to the cart.
-app.post("/api/cart", async (req, res) => {
+// Add a product to the cart (increments qty if already present).
+// Body: { productId, name, price, icon, qty? }
+app.post("/api/cart", authRequired, async (req, res) => {
   try {
-    const item = (req.body && req.body.item) || "item";
-    await redisClient.rPush(CART_KEY, String(item));
-    res.json(await cartState());
+    const { productId, name, price, icon, qty } = req.body || {};
+    if (productId == null || name == null || price == null) {
+      return res.status(400).json({ error: "productId, name and price are required" });
+    }
+    const key = cartKey(req.user.sub);
+    const field = String(productId);
+    const existing = await redisClient.hGet(key, field);
+    const current = existing ? JSON.parse(existing) : { productId, name, price, icon: icon || "📦", qty: 0 };
+    current.qty += Number(qty) > 0 ? Number(qty) : 1;
+    current.price = price; // keep latest price snapshot
+    await redisClient.hSet(key, field, JSON.stringify(current));
+    res.json(await cartState(req.user.sub));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// Remove a single occurrence of an item from the cart.
-app.post("/api/cart/remove", async (req, res) => {
+// Set an exact quantity for a line (qty <= 0 removes it). Body: { productId, qty }
+app.put("/api/cart", authRequired, async (req, res) => {
   try {
-    const item = req.body && req.body.item;
-    if (item) await redisClient.lRem(CART_KEY, 1, String(item)); // remove first match
-    res.json(await cartState());
+    const { productId, qty } = req.body || {};
+    if (productId == null) return res.status(400).json({ error: "productId is required" });
+    const key = cartKey(req.user.sub);
+    const field = String(productId);
+    if (Number(qty) <= 0) {
+      await redisClient.hDel(key, field);
+    } else {
+      const existing = await redisClient.hGet(key, field);
+      if (!existing) return res.status(404).json({ error: "item not in cart" });
+      const line = JSON.parse(existing);
+      line.qty = Number(qty);
+      await redisClient.hSet(key, field, JSON.stringify(line));
+    }
+    res.json(await cartState(req.user.sub));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// Empty the whole cart.
-app.delete("/api/cart", async (_req, res) => {
+// Remove a whole line from the cart. Body: { productId }
+app.post("/api/cart/remove", authRequired, async (req, res) => {
   try {
-    await redisClient.del(CART_KEY);
-    res.json(await cartState());
+    const { productId } = req.body || {};
+    if (productId != null) await redisClient.hDel(cartKey(req.user.sub), String(productId));
+    res.json(await cartState(req.user.sub));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Empty the whole cart (called after a successful checkout).
+app.delete("/api/cart", authRequired, async (req, res) => {
+  try {
+    await redisClient.del(cartKey(req.user.sub));
+    res.json(await cartState(req.user.sub));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

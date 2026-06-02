@@ -4,6 +4,22 @@ Benchmark the **same** microservices e-commerce app deployed two ways on AWS, so
 the CTO can pick an orchestrator. One codebase, one set of container images, two
 runtimes.
 
+**ShopNow is a full storefront:** browse/search a catalog, register & log in
+(JWT), keep a per-user cart with quantities, check out through a **mock payment
+gateway**, view order history, and manage the catalog + orders from an **admin
+panel**. The UI is an **Angular SPA**; the three backend services keep the
+original "database-per-service" shape so the ECS-vs-EKS comparison still holds.
+
+| Area      | What you can do                                                        |
+|-----------|------------------------------------------------------------------------|
+| Storefront| Search, filter by category, product detail pages, add to cart          |
+| Accounts  | Register / login, JWT-secured sessions, per-user carts & order history  |
+| Checkout  | Quantities, mock payment (declines any card ending `0000`), order confirmation |
+| Admin     | Dashboard stats, product CRUD, view all orders (role-gated)            |
+
+**Demo logins** (seeded on first boot): admin `admin@shopnow.local` / `admin123`,
+customer `demo@shopnow.local` / `demo123`.
+
 ```
                        ┌──────────────┐
               ┌───────►│  Products svc├──► Postgres   (own DB)
@@ -19,17 +35,23 @@ runtimes.
 Three independently deployable services + **database-per-service** (Products owns
 Postgres, Cart owns Redis):
 
-| Service   | Tech                | Owns / talks to        | Port |
-|-----------|---------------------|------------------------|------|
-| Frontend  | Node.js + Express   | calls Products & Cart  | 8080 |
-| Products  | Node.js + Express   | **Postgres** (catalog) | 5001 |
-| Cart      | Node.js + Express   | **Redis** (cart+visits)| 5002 |
-| Postgres  | postgres:16-alpine  | — (owned by Products)  | 5432 |
-| Redis     | redis:7-alpine      | — (owned by Cart)      | 6379 |
+| Service   | Tech                      | Owns / talks to                       | Port |
+|-----------|---------------------------|---------------------------------------|------|
+| Frontend  | Angular SPA + Express proxy | serves the SPA, calls Products & Cart | 8080 |
+| Products  | Node.js + Express         | **Postgres** (catalog, users, orders) | 5001 |
+| Cart      | Node.js + Express         | **Redis** (per-user carts + visits)   | 5002 |
+| Postgres  | postgres:16-alpine        | — (owned by Products)                 | 5432 |
+| Redis     | redis:7-alpine            | — (owned by Cart)                     | 6379 |
+
+The Products service is the relational system-of-record (catalog + accounts +
+orders); the Cart service keeps per-user carts in Redis. Both verify the **same
+JWT** using a shared `JWT_SECRET`, so auth works regardless of which service the
+request lands on. The frontend builds the Angular app at image-build time and
+serves the static bundle, reverse-proxying `/api/*` to the right service.
 
 The frontend never hard-codes addresses; it discovers each service by name via
-two env vars (`PRODUCTS_URL`, `CART_URL`). Those are the only thing that differs
-between environments:
+two env vars (`PRODUCTS_URL`, `CART_URL`). Those — plus the shared `JWT_SECRET` —
+are the only things that differ between environments:
 
 | Service  | ECS (Cloud Map)                       | EKS (kube-dns)        |
 |----------|---------------------------------------|-----------------------|
@@ -43,9 +65,10 @@ between environments:
 ```
 .
 ├── app/
-│   ├── frontend/        # Node UI + proxy to both services + Dockerfile
-│   ├── products/        # Products microservice (Postgres) + Dockerfile
-│   └── cart/            # Cart microservice (Redis) + Dockerfile
+│   ├── frontend/        # Express proxy + Dockerfile (multi-stage)
+│   │   └── web/         #   Angular SPA (storefront + admin), built into the image
+│   ├── products/        # Products/core API (Postgres: catalog, users, orders)
+│   └── cart/            # Cart microservice (Redis: per-user carts) + Dockerfile
 ├── docker-compose.yml   # run the whole stack locally
 ├── terraform/           # VPC + ECR + ECS stack + EKS cluster (one apply)
 │   ├── vpc.tf  ecr.tf  ecs.tf  eks.tf  variables.tf  outputs.tf
@@ -77,25 +100,40 @@ The images are environment-agnostic; service names in compose (`postgres`,
 
 ```bash
 docker compose up --build
-# open http://localhost:8080
+# open http://localhost:8080  (Angular storefront)
 ```
 
-Quick smoke test (this is what was verified during build):
+The Postgres catalog and the demo admin/customer accounts are seeded on first
+boot. Sign in with one of the demo logins above, browse, add to cart, and check
+out with any card number (e.g. `4242 4242 4242 4242`; a number ending in `0000`
+is declined so you can test the failure path).
+
+Quick API smoke test against the proxy (this is what was verified during build):
 
 ```bash
-curl localhost:8080/health        # {"status":"ok","tier":"frontend"}
-curl localhost:8080/api/products  # {servedBy, products}  -> Products svc -> Postgres
-curl localhost:8080/api/visits    # {servedBy, visits}    -> Cart svc -> Redis
-curl -X POST localhost:8080/api/cart -H 'Content-Type: application/json' \
-     -d '{"item":"Wireless Mouse"}'          # add to cart  -> Cart svc -> Redis
-curl localhost:8080/api/cart                 # list cart items + count
-curl -X POST localhost:8080/api/cart/remove -H 'Content-Type: application/json' \
-     -d '{"item":"Wireless Mouse"}'          # remove one item
-curl -X DELETE localhost:8080/api/cart       # empty the cart
+B=http://localhost:8080
+curl $B/health                                   # {"status":"ok","tier":"frontend"}
+curl "$B/api/products?search=mouse"              # catalog (search/filter) -> Products -> Postgres
+curl "$B/api/categories"                         # distinct categories
+
+# Auth -> capture a JWT
+TOKEN=$(curl -s -X POST $B/api/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"demo@shopnow.local","password":"demo123"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+
+# Per-user cart (requires the token) -> Cart -> Redis
+curl -X POST $B/api/cart -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"productId":1,"name":"Wireless Mouse","price":24.99,"icon":"🖱️","qty":2}'
+curl $B/api/cart -H "Authorization: Bearer $TOKEN"   # {items, count, subtotal}
+
+# Checkout through the mock gateway -> Products -> Postgres (orders)
+curl -X POST $B/api/orders -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"items":[{"productId":1,"name":"Wireless Mouse","price":24.99,"qty":2}],
+       "payment":{"cardNumber":"4242 4242 4242 4242","name":"Demo","expiry":"12/29","cvc":"123"}}'
+curl $B/api/orders -H "Authorization: Bearer $TOKEN"  # order history
 ```
 
-`servedBy` shows which instance answered — note Products and Cart report
-different IDs, proving they are separate services.
+`servedBy` (on catalog/cart responses) shows which instance answered — note
+Products and Cart report different IDs, proving they are separate services.
 
 Tear down: `docker compose down -v`
 
@@ -359,4 +397,14 @@ cd terraform && terraform destroy
 - **Same images, two runtimes.** The only per-environment change is the service
   URLs (`PRODUCTS_URL` / `CART_URL`), proving the containers are portable.
 - **Secrets** are inline here for clarity only. Replace with AWS Secrets Manager
-  (ECS `secrets`) / Kubernetes external-secrets in production.
+  (ECS `secrets`) / Kubernetes external-secrets in production. This now includes
+  the shared `JWT_SECRET` — it must be identical for the Products and Cart
+  services (they both verify the same auth tokens). It's a Terraform `jwt_secret`
+  variable for ECS and the `app-secrets` Secret for EKS.
+- **Payments are mocked.** Checkout runs a deterministic in-process gateway (any
+  card ending `0000` is declined); no real charge, no external keys. Swap in a
+  real PSP (Stripe, etc.) at the `POST /api/orders` boundary for production.
+- **The frontend has a build step.** The Angular app under `app/frontend/web` is
+  compiled during the Docker image build (multi-stage); the runtime image just
+  serves the static bundle and proxies `/api`. The image is still environment-
+  agnostic — same image on ECS and EKS.

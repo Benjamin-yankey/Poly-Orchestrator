@@ -2,3 +2,15 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: shopnow
+---
+# Shared application secret. The JWT signing key MUST be identical for the
+# products and cart services (both verify the same tokens). Demo value only —
+# replace with an external-secrets / Secrets Manager-backed secret in production.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: shopnow
+type: Opaque
+stringData:
+  JWT_SECRET: shopnow_dev_secret_change_me

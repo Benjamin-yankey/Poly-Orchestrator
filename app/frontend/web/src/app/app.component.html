@@ -1,0 +1,28 @@
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a routerLink="/" class="brand">Shop<span class="dot">Now</span></a>
+    <div class="nav-links">
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Shop</a>
+      @if (auth.isLoggedIn()) {
+        <a routerLink="/orders" routerLinkActive="active">Orders</a>
+      }
+      @if (auth.isAdmin()) {
+        <a routerLink="/admin" routerLinkActive="active">Admin</a>
+      }
+      <a routerLink="/cart" class="cart-pill" title="Cart">
+        🛒 Cart
+        @if (cart.state().count > 0) {
+          <span class="badge">{{ cart.state().count }}</span>
+        }
+      </a>
+      @if (auth.isLoggedIn()) {
+        <span class="muted">Hi, {{ auth.user()?.name || auth.user()?.email }}</span>
+        <a href="javascript:void(0)" (click)="logout()">Logout</a>
+      } @else {
+        <a routerLink="/login" routerLinkActive="active">Login</a>
+      }
+    </div>
+  </div>
+</nav>
+
+<router-outlet />

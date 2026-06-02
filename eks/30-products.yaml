@@ -35,6 +35,10 @@ spec:
             - name: PG_DATABASE
               valueFrom:
                 secretKeyRef: { name: db-credentials, key: POSTGRES_DB }
+            # Shared JWT signing secret (auth) — must match the cart service.
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: JWT_SECRET }
           readinessProbe:
             httpGet:
               path: /health

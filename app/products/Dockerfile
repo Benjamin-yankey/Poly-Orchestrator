@@ -6,7 +6,7 @@ WORKDIR /usr/src/app
 COPY package.json ./
 RUN npm install --omit=dev
 
-COPY server.js ./
+COPY server.js auth.js ./
 
 USER node
 

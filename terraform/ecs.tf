@@ -241,7 +241,8 @@ resource "aws_ecs_task_definition" "products" {
       { name = "PG_HOST", value = "postgres.shopnow.local" },
       { name = "PG_USER", value = "shopnow" },
       { name = "PG_PASSWORD", value = var.db_password },
-      { name = "PG_DATABASE", value = "shopnow" }
+      { name = "PG_DATABASE", value = "shopnow" },
+      { name = "JWT_SECRET", value = var.jwt_secret }
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -269,7 +270,8 @@ resource "aws_ecs_task_definition" "cart" {
     essential    = true
     portMappings = [{ containerPort = 5002 }]
     environment = [
-      { name = "REDIS_HOST", value = "redis.shopnow.local" }
+      { name = "REDIS_HOST", value = "redis.shopnow.local" },
+      { name = "JWT_SECRET", value = var.jwt_secret }
     ]
     logConfiguration = {
       logDriver = "awslogs"

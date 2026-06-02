@@ -36,3 +36,10 @@ variable "db_password" {
   default     = "shopnow_pass"
   sensitive   = true
 }
+
+variable "jwt_secret" {
+  description = "Shared JWT signing secret for auth (demo only — use Secrets Manager in production). Must be identical for the products and cart services."
+  type        = string
+  default     = "shopnow_dev_secret_change_me"
+  sensitive   = true
+}

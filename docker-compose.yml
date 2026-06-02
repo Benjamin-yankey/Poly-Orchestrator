@@ -29,7 +29,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # Products microservice — owns Postgres.
+  # Products / core API microservice — owns Postgres (catalog, users, orders).
   products:
     build: ./app/products
     environment:
@@ -37,15 +37,18 @@ services:
       PG_USER: shopnow
       PG_PASSWORD: shopnow_pass
       PG_DATABASE: shopnow
+      # Shared signing secret for JWTs — MUST match the cart service.
+      JWT_SECRET: ${JWT_SECRET:-shopnow_dev_secret_change_me}
     depends_on:
       postgres:
         condition: service_healthy
 
-  # Cart microservice — owns Redis.
+  # Cart microservice — owns Redis (per-user carts). Verifies the same JWTs.
   cart:
     build: ./app/cart
     environment:
       REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET:-shopnow_dev_secret_change_me}
     depends_on:
       redis:
         condition: service_healthy

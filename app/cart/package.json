@@ -1,13 +1,14 @@
 {
   "name": "shopnow-cart",
-  "version": "1.0.0",
-  "description": "ShopNow Cart service - owns the Redis store (cart + visit counter)",
+  "version": "2.0.0",
+  "description": "ShopNow Cart service - owns Redis (per-user carts + visit counter)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
     "redis": "^4.6.14"
   }
 }
