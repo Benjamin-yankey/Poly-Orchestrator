@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: shopnow
+type: Opaque
+stringData:
+  POSTGRES_USER: shopnow
+  POSTGRES_PASSWORD: shopnow_pass
+  POSTGRES_DB: shopnow
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: shopnow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: db-credentials
+          # PGDATA in a subdir keeps emptyDir happy.
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "shopnow"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        # Ephemeral for the demo. Swap for a PVC (gp2 StorageClass exists by
+        # default on EKS) if you need data to survive a pod restart.
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: shopnow
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  # Headless-friendly ClusterIP; reachable in-cluster as "postgres".
+  type: ClusterIP

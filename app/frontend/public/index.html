@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShopNow</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+    h1 { color: #2563eb; margin-bottom: 4px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin: 12px 0; }
+    .product { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+    .product .icon { font-size: 22px; width: 30px; text-align: center; }
+    .product .info { flex: 1; }
+    .product .cat { font-size: 12px; color: #6b7280; }
+    .price { font-weight: 600; color: #16a34a; min-width: 70px; text-align: right; }
+    .cart-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f6f6f6; }
+    .meta { font-size: 13px; color: #6b7280; }
+    .svc { font-size: 12px; color: #9ca3af; }
+    button { background: #2563eb; color: #fff; border: 0; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    button.ghost { background: #fff; color: #2563eb; border: 1px solid #2563eb; }
+    button.danger { background: #fff; color: #dc2626; border: 1px solid #dc2626; padding: 2px 8px; }
+    .row { display: flex; justify-content: space-between; align-items: center; }
+    .empty { color: #9ca3af; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>🛒 ShopNow</h1>
+  <p class="meta">A microservices demo (frontend + products + cart) deployed on both ECS (Fargate) and EKS.</p>
+
+  <div class="card">
+    <h3>Products <span class="meta">— products service → Postgres</span></h3>
+    <div id="products">Loading…</div>
+    <p class="svc">served by: <code id="products-svc">…</code></p>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <h3 style="margin:0">Cart <span class="meta">— cart service → Redis</span></h3>
+      <button class="ghost" onclick="clearCart()">Clear cart</button>
+    </div>
+    <div id="cart" style="margin-top:10px">…</div>
+    <p style="margin-top:12px">Page visits: <strong id="visits">…</strong></p>
+    <p class="svc">served by: <code id="cart-svc">…</code></p>
+  </div>
+
+  <script>
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    async function loadProducts() {
+      try {
+        const r = await fetch("/api/products");
+        const { products, servedBy } = await r.json();
+        document.getElementById("products").innerHTML = products.map(p => `
+          <div class="product">
+            <span class="icon">${p.icon || "📦"}</span>
+            <span class="info"><strong>${esc(p.name)}</strong><div class="cat">${esc(p.category || "")}</div></span>
+            <span class="price">$${p.price}</span>
+            <button onclick="addToCart('${esc(p.name)}')">Add</button>
+          </div>`).join("");
+        document.getElementById("products-svc").textContent = servedBy;
+      } catch {
+        document.getElementById("products").textContent = "Products service unreachable";
+      }
+    }
+
+    function renderCart({ items, servedBy }) {
+      const el = document.getElementById("cart");
+      if (!items || items.length === 0) {
+        el.innerHTML = '<p class="empty">Your cart is empty.</p>';
+      } else {
+        el.innerHTML = `<p class="meta">${items.length} item(s)</p>` + items.map((it, i) => `
+          <div class="cart-item">
+            <span>${esc(it)}</span>
+            <button class="danger" onclick="removeFromCart('${esc(it)}')">✕</button>
+          </div>`).join("");
+      }
+      if (servedBy) document.getElementById("cart-svc").textContent = servedBy;
+    }
+
+    async function loadCart() {
+      try { renderCart(await (await fetch("/api/cart")).json()); }
+      catch { document.getElementById("cart").innerHTML = '<p class="empty">Cart service unreachable</p>'; }
+    }
+
+    async function addToCart(item) {
+      renderCart(await (await fetch("/api/cart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item }),
+      })).json());
+    }
+
+    async function removeFromCart(item) {
+      renderCart(await (await fetch("/api/cart/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item }),
+      })).json());
+    }
+
+    async function clearCart() {
+      renderCart(await (await fetch("/api/cart", { method: "DELETE" })).json());
+    }
+
+    async function loadVisits() {
+      try {
+        const { visits } = await (await fetch("/api/visits")).json();
+        document.getElementById("visits").textContent = visits;
+      } catch { document.getElementById("visits").textContent = "?"; }
+    }
+
+    loadProducts(); loadCart(); loadVisits();
+  </script>
+</body>
+</html>

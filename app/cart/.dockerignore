@@ -1,0 +1,6 @@
+node_modules
+npm-debug.log
+.git
+.terraform
+*.tfstate*
+.DS_Store

@@ -1,0 +1,58 @@
+# Cart microservice — owns Redis (database-per-service).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart
+  namespace: shopnow
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cart
+  template:
+    metadata:
+      labels:
+        app: cart
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: cart
+          # REPLACE <ACCOUNT>/<REGION> — see README "Build & push images".
+          image: <ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/shopnow/cart:latest
+          ports:
+            - containerPort: 5002
+          env:
+            - name: REDIS_HOST
+              value: redis
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5002
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5002
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cart
+  namespace: shopnow
+spec:
+  selector:
+    app: cart
+  ports:
+    - port: 5002
+      targetPort: 5002
+  type: ClusterIP

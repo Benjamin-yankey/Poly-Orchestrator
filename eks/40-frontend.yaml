@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: shopnow
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: frontend
+          # REPLACE <ACCOUNT>/<REGION> — see README "Build & push images".
+          image: <ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/shopnow/frontend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            # Reach each microservice by its Service name (Kubernetes DNS).
+            - name: PRODUCTS_URL
+              value: http://products:5001
+            - name: CART_URL
+              value: http://cart:5002
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: shopnow
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 8080
+  # NodePort so the ALB Ingress can target it. (ClusterIP also works with
+  # target-type=ip; NodePort is the most broadly compatible default.)
+  type: NodePort

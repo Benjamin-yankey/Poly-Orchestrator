@@ -1,0 +1,70 @@
+# Products microservice — owns Postgres (database-per-service).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: products
+  namespace: shopnow
+spec:
+  replicas: 2 # 2 pods so load balancing + self-healing are observable
+  selector:
+    matchLabels:
+      app: products
+  template:
+    metadata:
+      labels:
+        app: products
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: products
+          # REPLACE <ACCOUNT>/<REGION> — see README "Build & push images".
+          image: <ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/shopnow/products:latest
+          ports:
+            - containerPort: 5001
+          env:
+            # Service discovery via Kubernetes DNS.
+            - name: PG_HOST
+              value: postgres
+            # Map secret keys (POSTGRES_*) to the names the app reads (PG_*).
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: POSTGRES_USER }
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: POSTGRES_PASSWORD }
+            - name: PG_DATABASE
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: POSTGRES_DB }
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: products
+  namespace: shopnow
+spec:
+  selector:
+    app: products
+  ports:
+    - port: 5001
+      targetPort: 5001
+  # ClusterIP = internal load balancer across the products pods.
+  type: ClusterIP
