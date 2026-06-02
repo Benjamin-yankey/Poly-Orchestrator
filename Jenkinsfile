@@ -39,6 +39,16 @@ pipeline {
   }
 
   stages {
+    stage('Checkout') {
+      steps {
+        // Clone over HTTPS using the 'github-token' credential
+        // (Username with password: GitHub username + PAT).
+        git branch: 'main',
+            credentialsId: 'github-token',
+            url: 'https://github.com/Benjamin-yankey/Poly-Orchestrator.git'
+      }
+    }
+
     stage('Resolve account & tag') {
       steps {
         script {
