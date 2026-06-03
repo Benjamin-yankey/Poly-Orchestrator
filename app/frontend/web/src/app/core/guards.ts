@@ -17,3 +17,12 @@ export const adminGuard: CanActivateFn = () => {
   if (auth.isAdmin()) return true;
   return router.createUrlTree(['/']);
 };
+
+// Allow the admin console for admins (full control) and the staffing team
+// (read-only). Other roles are bounced home.
+export const managementGuard: CanActivateFn = () => {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+  if (auth.canViewAdmin()) return true;
+  return router.createUrlTree(['/']);
+};

@@ -3,13 +3,19 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../core/auth.service';
+import { IconComponent } from '../core/icon.component';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, IconComponent],
   template: `
-    <div class="container">
+    <div class="auth-page">
+      <div class="auth-hero">
+        <span class="pill"><app-icon name="marketplace" [size]="14" /> ShopNow Marketplace</span>
+        <h2>Welcome back to the marketplace</h2>
+        <p>Sign in to shop the catalog, track your orders and sell to the community.</p>
+      </div>
       <div class="card auth-card">
         <h1>Welcome back</h1>
         <p class="muted">Sign in to your ShopNow account.</p>
@@ -17,7 +23,8 @@ import { AuthService } from '../core/auth.service';
         <div class="alert info">
           <strong>Demo logins</strong><br />
           Customer — <code>demo&#64;shopnow.local</code> / <code>demo123</code><br />
-          Admin — <code>admin&#64;shopnow.local</code> / <code>admin123</code>
+          Admin — <code>admin&#64;shopnow.local</code> / <code>admin123</code><br />
+          Staffing (read-only) — <code>staff&#64;shopnow.local</code> / <code>staff123</code>
         </div>
 
         @if (error()) { <div class="alert error">{{ error() }}</div> }

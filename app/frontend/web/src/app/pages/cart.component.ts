@@ -3,24 +3,25 @@ import { CommonModule } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { CartService } from '../core/cart.service';
 import { AuthService } from '../core/auth.service';
+import { IconComponent } from '../core/icon.component';
 import { CartItem } from '../core/models';
 
 @Component({
   selector: 'app-cart',
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  imports: [CommonModule, RouterLink, IconComponent],
   template: `
     <div class="container">
       <div class="page-head"><h1>Your cart</h1></div>
 
       @if (!auth.isLoggedIn()) {
         <div class="empty">
-          <div class="big">🔒</div>
+          <div class="big"><app-icon name="lock" [size]="56" /></div>
           <p>Please <a routerLink="/login" [queryParams]="{ redirect: '/cart' }">sign in</a> to view your cart.</p>
         </div>
       } @else if (cart.state().items.length === 0) {
         <div class="empty">
-          <div class="big">🛒</div>
+          <div class="big"><app-icon name="cart" [size]="56" /></div>
           <p>Your cart is empty.</p>
           <a class="btn" routerLink="/">Start shopping</a>
         </div>
@@ -29,7 +30,7 @@ import { CartItem } from '../core/models';
           <div class="card" style="padding:6px 22px">
             @for (it of cart.state().items; track it.productId) {
               <div class="cart-line">
-                <div class="ic">{{ it.icon }}</div>
+                <div class="ic"><app-icon name="image" [size]="24" /></div>
                 <div>
                   <strong>{{ it.name }}</strong><br />
                   <span class="muted">\${{ (+it.price).toFixed(2) }} each</span>

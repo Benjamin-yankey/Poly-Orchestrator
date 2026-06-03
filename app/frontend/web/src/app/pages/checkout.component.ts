@@ -4,19 +4,20 @@ import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { CartService } from '../core/cart.service';
 import { OrderService } from '../core/order.service';
+import { IconComponent } from '../core/icon.component';
 import { Order, PaymentDetails } from '../core/models';
 
 @Component({
   selector: 'app-checkout',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, IconComponent],
   template: `
     <div class="container">
       <div class="page-head"><h1>Checkout</h1></div>
 
       @if (placed(); as o) {
         <div class="card" style="max-width:560px;margin:0 auto;padding:36px;text-align:center">
-          <div style="font-size:3.4rem">✅</div>
+          <div style="color:var(--success, #16a34a);display:flex;justify-content:center"><app-icon name="check" [size]="56" /></div>
           <h2>Payment successful</h2>
           <p class="muted">Order <strong>#{{ o.id }}</strong> is confirmed.</p>
           <p>Total charged: <strong>\${{ (+o.total).toFixed(2) }}</strong></p>
@@ -27,14 +28,15 @@ import { Order, PaymentDetails } from '../core/models';
           </div>
         </div>
       } @else if (cart.state().items.length === 0) {
-        <div class="empty"><div class="big">🛒</div><p>Your cart is empty.</p><a class="btn" routerLink="/">Shop now</a></div>
+        <div class="empty"><div class="big"><app-icon name="cart" [size]="56" /></div><p>Your cart is empty.</p><a class="btn" routerLink="/">Shop now</a></div>
       } @else {
         <div class="layout-2">
           <div class="card" style="padding:26px">
             <h3 style="margin-top:0">Payment details</h3>
-            <div class="alert info">
-              💳 <strong>Mock gateway.</strong> Use any card number — e.g. <code>4242 4242 4242 4242</code>.
-              Any number <em>ending in 0000</em> is declined so you can test failures.
+            <div class="alert info" style="display:flex;align-items:flex-start;gap:8px">
+              <app-icon name="card" [size]="18" />
+              <span><strong>Mock gateway.</strong> Use any card number — e.g. <code>4242 4242 4242 4242</code>.
+              Any number <em>ending in 0000</em> is declined so you can test failures.</span>
             </div>
             @if (error()) { <div class="alert error">{{ error() }}</div> }
 
@@ -56,7 +58,7 @@ import { Order, PaymentDetails } from '../core/models';
           <div class="card summary">
             <h3 style="margin-top:0">Your order</h3>
             @for (it of cart.state().items; track it.productId) {
-              <div class="line"><span>{{ it.icon }} {{ it.name }} × {{ it.qty }}</span><span>\${{ (+it.price * it.qty).toFixed(2) }}</span></div>
+              <div class="line"><span>{{ it.name }} × {{ it.qty }}</span><span>\${{ (+it.price * it.qty).toFixed(2) }}</span></div>
             }
             <div class="line total"><span>Total</span><span>\${{ cart.state().subtotal.toFixed(2) }}</span></div>
           </div>

@@ -81,7 +81,7 @@ a:hover { text-decoration: underline; }
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow);
 }
-.page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
 .page-head h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.02em; }
 .muted { color: var(--muted); }
 .center { text-align: center; }
@@ -107,6 +107,13 @@ a:hover { text-decoration: underline; }
 }
 .product:hover { transform: translateY(-3px); box-shadow: 0 12px 30px rgba(16,24,40,.12); }
 .product .icon { font-size: 3rem; text-align: center; padding: 14px 0 10px; }
+/* Image / placeholder thumbnail for catalog + marketplace cards. */
+.product .media {
+  display: flex; align-items: center; justify-content: center; height: 160px; overflow: hidden;
+  border-radius: 12px; background: var(--bg); color: var(--muted); margin-bottom: 12px;
+}
+.product .media img { width: 100%; height: 100%; object-fit: cover; }
+.product .media .emoji { font-size: 3.6rem; line-height: 1; }
 .product .cat { font-size: 0.74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--brand); font-weight: 700; }
 .product h3 { margin: 4px 0 6px; font-size: 1.02rem; }
 .product .desc { color: var(--muted); font-size: 0.86rem; flex: 1; margin-bottom: 12px;
@@ -124,6 +131,39 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand); bor
 .field-row > div { flex: 1; }
 .auth-card { max-width: 420px; margin: 40px auto; padding: 30px; }
 .auth-card h1 { margin-top: 0; }
+
+/* ---------- Auth pages (login / register) ---------- */
+/* Full-bleed marketplace backdrop with a brand gradient overlay so the white
+   card stays readable even if the photo is slow to load or unavailable. */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 48px 20px;
+  background-color: var(--brand-dark);
+  background-image:
+    linear-gradient(150deg, rgba(67, 56, 202, 0.80), rgba(16, 24, 40, 0.82)),
+    url('https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1400&q=70');
+  background-size: cover;
+  background-position: center;
+}
+.auth-hero { text-align: center; color: #fff; max-width: 540px; }
+.auth-hero .pill {
+  display: inline-flex; align-items: center; gap: 7px; padding: 6px 14px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16); font-size: 0.8rem; font-weight: 700; margin-bottom: 14px;
+}
+.auth-hero h2 { font-size: 2rem; line-height: 1.15; margin: 0 0 8px; letter-spacing: -0.02em; }
+.auth-hero p { margin: 0; opacity: 0.92; font-size: 1.02rem; }
+.auth-page .auth-card {
+  margin: 0; width: 100%; max-width: 440px;
+  box-shadow: 0 24px 60px rgba(16, 24, 40, 0.35);
+}
+@media (max-width: 560px) {
+  .auth-hero h2 { font-size: 1.6rem; }
+}
 
 /* ---------- Alerts ---------- */
 .alert { border-radius: 10px; padding: 11px 14px; font-size: 0.9rem; margin: 14px 0; }
@@ -161,5 +201,33 @@ th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-
 .empty .big { font-size: 3.4rem; }
 .spinner { text-align: center; padding: 50px; color: var(--muted); }
 .detail { display: grid; grid-template-columns: 260px 1fr; gap: 30px; align-items: start; }
-.detail .hero { font-size: 7rem; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 30px; }
+.detail .hero {
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  min-height: 260px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 30px;
+}
+.detail .hero img { width: 100%; height: 100%; max-height: 320px; object-fit: cover; border-radius: 10px; }
+.detail .hero .emoji { font-size: 7rem; line-height: 1; }
 @media (max-width: 700px) { .detail { grid-template-columns: 1fr; } }
+
+/* ---------- Responsive ---------- */
+/* Wide data tables (admin, orders) scroll horizontally on small screens instead
+   of squashing columns or overflowing their card. */
+.table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll table { min-width: 560px; }
+
+@media (max-width: 640px) {
+  .container { padding: 20px 14px 48px; }
+  .page-head h1 { font-size: 1.4rem; }
+  /* Stack paired inputs (price/stock, phone/location, etc.). */
+  .field-row { flex-direction: column; gap: 0; }
+  /* Tighten cart rows: shrink the icon/gap and let the name cell (minmax 0)
+     truncate instead of pushing the qty/price/remove controls off-screen. */
+  .cart-line { grid-template-columns: 36px minmax(0, 1fr) auto auto auto; gap: 8px; }
+  /* Stat figures shrink a touch to avoid wrapping inside small cards. */
+  .stat .n { font-size: 1.5rem; }
+}
+
+@media (max-width: 380px) {
+  .grid { grid-template-columns: 1fr; }
+}
