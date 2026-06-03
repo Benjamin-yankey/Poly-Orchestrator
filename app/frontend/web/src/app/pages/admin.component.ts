@@ -7,6 +7,7 @@ import { AuthService } from '../core/auth.service';
 import { IconComponent } from '../core/icon.component';
 import { SettingsService } from '../core/settings.service';
 import {
+  AdminReview,
   AdminStats,
   AdminUser,
   AuditEntry,
@@ -19,7 +20,6 @@ import {
   Product,
   Role,
   ROLE_INFO,
-  SiteSettings,
 } from '../core/models';
 
 type Tab =
@@ -486,6 +486,35 @@ type Tab =
           </div>
         }
       }
+      <!-- ============================ REVIEWS ============================ -->
+      @if (tab() === 'reviews') {
+        <p class="muted" style="margin-top:0">Product reviews await approval before they appear on the storefront.</p>
+        <div class="card" style="padding:6px 20px">
+          <div class="table-scroll">
+          <table>
+            <thead><tr><th>Product</th><th>Author</th><th>Rating</th><th>Comment</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              @for (rv of reviews(); track rv.id) {
+                <tr>
+                  <td>{{ rv.product_name }}</td>
+                  <td>{{ rv.author || '—' }}<br /><span class="muted" style="font-size:.8rem">{{ rv.author_email }}</span></td>
+                  <td><span class="stars">{{ stars(rv.rating) }}</span></td>
+                  <td style="max-width:280px">{{ rv.comment || '—' }}</td>
+                  <td><span class="tag" [ngClass]="rv.approved ? 'status-delivered' : 'status-processing'">{{ rv.approved ? 'approved' : 'pending' }}</span></td>
+                  <td class="row">
+                    @if (canManage()) {
+                      <button class="btn ghost sm" (click)="approveReview(rv)">{{ rv.approved ? 'Unapprove' : 'Approve' }}</button>
+                      <button class="btn ghost sm" style="color:var(--danger)" (click)="delReview(rv)">Remove</button>
+                    } @else { <span class="muted">—</span> }
+                  </td>
+                </tr>
+              } @empty { <tr><td colspan="6" class="muted center" style="padding:30px">No reviews yet.</td></tr> }
+            </tbody>
+          </table>
+          </div>
+        </div>
+      }
+
       <!-- ============================ SECURITY ============================ -->
       @if (tab() === 'security') {
         <p class="muted" style="margin-top:0">Audit trail of admin actions and logins — most recent first.</p>
@@ -640,6 +669,7 @@ type Tab =
      table.inner { width:100%; font-size:.86rem; }
      table.inner th { color:var(--muted); font-weight:600; text-align:left; }
      .stock-in { width:90px; padding:6px 8px; border-radius:8px; }
+     .stars { color:#f59e0b; letter-spacing:1px; white-space:nowrap; }
 
      .role-select { padding:6px 8px; border-radius:8px; font-size:.84rem; min-width:130px; }
 
@@ -704,8 +734,11 @@ export class AdminComponent implements OnInit {
   };
 
   // Content: site settings form.
-  settingsForm: SiteSettings = { store_name: '', banner: '' };
+  settingsForm: { store_name: string; banner: string } = { store_name: '', banner: '' };
   savingSettings = signal(false);
+
+  // Review moderation.
+  reviews = signal<AdminReview[]>([]);
 
   // Role catalog for the Roles tab and the Users role <select>.
   roleInfo = ROLE_INFO;
@@ -757,6 +790,13 @@ export class AdminComponent implements OnInit {
     if (tab === 'security') this.loadAudit();
     if (tab === 'coupons') this.loadCoupons();
     if (tab === 'settings') this.loadSettings();
+    if (tab === 'reviews') this.loadReviews();
+  }
+
+  // Compact 5-star display, e.g. ★★★★☆.
+  stars(rating: number): string {
+    const n = Math.max(0, Math.min(5, Math.round(rating)));
+    return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n);
   }
 
   // Admins have full control; the staffing team gets a read-only view.
@@ -859,6 +899,34 @@ export class AdminComponent implements OnInit {
         this.savingSettings.set(false);
         this.error.set(e?.error?.error || 'Could not save settings');
       },
+    });
+  }
+
+  // ---- review moderation ----
+  loadReviews(): void {
+    this.admin.reviews().subscribe((r) => this.reviews.set(r.reviews));
+  }
+
+  approveReview(rv: AdminReview): void {
+    this.error.set('');
+    this.admin.approveReview(rv.id, !rv.approved).subscribe({
+      next: () => {
+        this.flash(rv.approved ? 'Review unapproved' : 'Review approved');
+        this.loadReviews();
+      },
+      error: (e) => this.error.set(e?.error?.error || 'Could not update review'),
+    });
+  }
+
+  delReview(rv: AdminReview): void {
+    if (!confirm('Remove this review? This cannot be undone.')) return;
+    this.error.set('');
+    this.admin.removeReview(rv.id).subscribe({
+      next: () => {
+        this.flash('Review removed');
+        this.loadReviews();
+      },
+      error: (e) => this.error.set(e?.error?.error || 'Could not remove review'),
     });
   }
 

@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { Product } from './models';
+import { Product, Review } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ProductService {
@@ -20,6 +20,20 @@ export class ProductService {
 
   get(id: number): Observable<{ product: Product }> {
     return this.http.get<{ product: Product }>(`/api/products/${id}`);
+  }
+
+  // ---- reviews ----
+  reviews(id: number): Observable<{ reviews: Review[]; average: number; count: number }> {
+    return this.http.get<{ reviews: Review[]; average: number; count: number }>(
+      `/api/products/${id}/reviews`
+    );
+  }
+
+  submitReview(
+    id: number,
+    body: { rating: number; comment: string }
+  ): Observable<{ review: Review }> {
+    return this.http.post<{ review: Review }>(`/api/products/${id}/reviews`, body);
   }
 
   // ---- admin ----
