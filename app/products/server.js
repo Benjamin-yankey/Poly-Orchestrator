@@ -160,6 +160,18 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS settings (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT ''
+    );
+    -- Product reviews. A shopper leaves one rating per product; reviews are held
+    -- for moderation (approved=false) until an admin approves them for display.
+    CREATE TABLE IF NOT EXISTS reviews (
+      id         SERIAL PRIMARY KEY,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      rating     INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+      comment    TEXT NOT NULL DEFAULT '',
+      approved   BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (product_id, user_id)
     );`;
 
   const seedProducts = `
@@ -281,6 +293,53 @@ app.get("/api/products/:id", async (req, res) => {
     );
     if (!rows.length) return res.status(404).json({ error: "product not found" });
     res.json({ product: rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Public: approved reviews for a product, plus the average rating and count.
+app.get("/api/products/:id/reviews", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.id, r.rating, r.comment, r.created_at, u.name AS author
+         FROM reviews r JOIN users u ON u.id = r.user_id
+        WHERE r.product_id = $1 AND r.approved = true
+        ORDER BY r.id DESC`,
+      [req.params.id]
+    );
+    const { rows: agg } = await pool.query(
+      `SELECT COALESCE(AVG(rating),0)::numeric(3,2) AS average, COUNT(*)::int AS count
+         FROM reviews WHERE product_id = $1 AND approved = true`,
+      [req.params.id]
+    );
+    res.json({ reviews: rows, average: Number(agg[0].average), count: agg[0].count });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Submit (or update) the caller's review for a product. Re-submitting overwrites
+// the previous one and sends it back to moderation (approved = false).
+app.post("/api/products/:id/reviews", authRequired, async (req, res) => {
+  try {
+    const { rating, comment } = req.body || {};
+    const r = Number(rating);
+    if (!Number.isInteger(r) || r < 1 || r > 5) {
+      return res.status(400).json({ error: "rating must be an integer from 1 to 5" });
+    }
+    const { rows: prod } = await pool.query("SELECT id FROM products WHERE id=$1", [req.params.id]);
+    if (!prod.length) return res.status(404).json({ error: "product not found" });
+    const { rows } = await pool.query(
+      `INSERT INTO reviews (product_id, user_id, rating, comment, approved)
+       VALUES ($1,$2,$3,$4,false)
+       ON CONFLICT (product_id, user_id)
+       DO UPDATE SET rating = EXCLUDED.rating, comment = EXCLUDED.comment,
+                     approved = false, created_at = now()
+       RETURNING id, rating, comment, approved, created_at`,
+      [req.params.id, req.user.sub, r, String(comment || "")]
+    );
+    res.status(201).json({ review: rows[0] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -882,7 +941,7 @@ app.post("/api/admin/users/:id/reset-password", authRequired, adminRequired, asy
 app.put("/api/admin/users/:id/active", authRequired, adminRequired, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const active = !!(req.body || {}).active;
+    const active = !!req.body?.active;
     if (id === req.user.sub && !active) {
       return res.status(400).json({ error: "you cannot disable your own account" });
     }
@@ -976,7 +1035,7 @@ app.get("/api/admin/audit", authRequired, managementRead, async (req, res) => {
 // Validate a promo code (used at checkout). Returns the percent off if usable.
 app.post("/api/coupons/validate", authRequired, async (req, res) => {
   try {
-    const coupon = await findValidCoupon((req.body || {}).code);
+    const coupon = await findValidCoupon(req.body?.code);
     if (!coupon) return res.status(404).json({ error: "invalid or expired coupon" });
     res.json({ coupon });
   } catch (e) {
@@ -1086,6 +1145,54 @@ app.put("/api/admin/settings", authRequired, adminRequired, async (req, res) => 
     audit(req.user, "settings.update", "", keys.join(", "));
     const { rows } = await pool.query("SELECT key, value FROM settings");
     res.json({ settings: Object.fromEntries(rows.map((r) => [r.key, r.value])) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Review & rating moderation
+// ---------------------------------------------------------------------------
+
+// Every review (approved or not) with product + author context, for moderation.
+app.get("/api/admin/reviews", authRequired, managementRead, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.id, r.product_id, r.rating, r.comment, r.approved, r.created_at,
+              p.name AS product_name, u.name AS author, u.email AS author_email
+         FROM reviews r
+         JOIN products p ON p.id = r.product_id
+         JOIN users u ON u.id = r.user_id
+        ORDER BY r.id DESC`
+    );
+    res.json({ reviews: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Approve (or un-approve) a review so it shows on the storefront.
+app.put("/api/admin/reviews/:id/approve", authRequired, adminRequired, async (req, res) => {
+  try {
+    const approved = req.body?.approved !== false; // defaults to true
+    const { rows } = await pool.query(
+      "UPDATE reviews SET approved=$2 WHERE id=$1 RETURNING id, product_id, rating, approved",
+      [Number(req.params.id), approved]
+    );
+    if (!rows.length) return res.status(404).json({ error: "review not found" });
+    audit(req.user, approved ? "review.approve" : "review.unapprove", "review:" + rows[0].id, "");
+    res.json({ review: rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete("/api/admin/reviews/:id", authRequired, adminRequired, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query("DELETE FROM reviews WHERE id=$1", [req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: "review not found" });
+    audit(req.user, "review.delete", "review:" + req.params.id, "");
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

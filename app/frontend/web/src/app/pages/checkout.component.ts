@@ -5,7 +5,7 @@ import { Router, RouterLink } from '@angular/router';
 import { CartService } from '../core/cart.service';
 import { OrderService } from '../core/order.service';
 import { IconComponent } from '../core/icon.component';
-import { Order, PaymentDetails } from '../core/models';
+import { Coupon, Order, PaymentDetails } from '../core/models';
 
 @Component({
   selector: 'app-checkout',
@@ -50,7 +50,7 @@ import { Order, PaymentDetails } from '../core/models';
                 <div><label>CVC</label><input name="cvc" [(ngModel)]="payment.cvc" placeholder="123" required /></div>
               </div>
               <button class="btn block success" style="margin-top:20px" [disabled]="loading()">
-                {{ loading() ? 'Processing…' : 'Pay $' + cart.state().subtotal.toFixed(2) }}
+                {{ loading() ? 'Processing…' : 'Pay $' + total().toFixed(2) }}
               </button>
             </form>
           </div>
@@ -60,7 +60,25 @@ import { Order, PaymentDetails } from '../core/models';
             @for (it of cart.state().items; track it.productId) {
               <div class="line"><span>{{ it.name }} × {{ it.qty }}</span><span>\${{ (+it.price * it.qty).toFixed(2) }}</span></div>
             }
-            <div class="line total"><span>Total</span><span>\${{ cart.state().subtotal.toFixed(2) }}</span></div>
+
+            <div style="margin:14px 0">
+              <label>Promo code</label>
+              <div class="row" style="gap:8px">
+                <input name="promo" [(ngModel)]="promo" placeholder="e.g. SAVE10" [disabled]="!!coupon()" style="flex:1" />
+                @if (coupon()) {
+                  <button type="button" class="btn ghost sm" (click)="clearCoupon()">Remove</button>
+                } @else {
+                  <button type="button" class="btn ghost sm" (click)="applyCoupon()">Apply</button>
+                }
+              </div>
+              @if (couponMsg()) { <p class="muted" style="margin:6px 0 0;font-size:.82rem">{{ couponMsg() }}</p> }
+            </div>
+
+            <div class="line"><span>Subtotal</span><span>\${{ cart.state().subtotal.toFixed(2) }}</span></div>
+            @if (coupon(); as c) {
+              <div class="line" style="color:var(--accent)"><span>Discount ({{ c.code }} −{{ c.percent_off }}%)</span><span>−\${{ discountAmount().toFixed(2) }}</span></div>
+            }
+            <div class="line total"><span>Total</span><span>\${{ total().toFixed(2) }}</span></div>
           </div>
         </div>
       }
@@ -73,16 +91,54 @@ export class CheckoutComponent implements OnInit {
   error = signal('');
   placed = signal<Order | null>(null);
 
+  // Promo code state.
+  promo = '';
+  coupon = signal<Coupon | null>(null);
+  couponMsg = signal('');
+
   constructor(public cart: CartService, private orders: OrderService, private router: Router) {}
 
   ngOnInit(): void {
     this.cart.refresh();
   }
 
+  // The discount applied to the current subtotal, and the resulting total.
+  discountAmount(): number {
+    const c = this.coupon();
+    if (!c) return 0;
+    return Math.round(this.cart.state().subtotal * (c.percent_off / 100) * 100) / 100;
+  }
+
+  total(): number {
+    return Math.max(0, Math.round((this.cart.state().subtotal - this.discountAmount()) * 100) / 100);
+  }
+
+  applyCoupon(): void {
+    this.couponMsg.set('');
+    const code = this.promo.trim();
+    if (!code) return;
+    this.orders.validateCoupon(code).subscribe({
+      next: (r) => {
+        this.coupon.set(r.coupon);
+        this.couponMsg.set(`Applied ${r.coupon.code} — ${r.coupon.percent_off}% off.`);
+      },
+      error: (e) => {
+        this.coupon.set(null);
+        this.couponMsg.set(e?.error?.error || 'That code is not valid.');
+      },
+    });
+  }
+
+  clearCoupon(): void {
+    this.coupon.set(null);
+    this.promo = '';
+    this.couponMsg.set('');
+  }
+
   pay(): void {
     this.error.set('');
     this.loading.set(true);
-    this.orders.place(this.cart.state().items, this.payment).subscribe({
+    this.orders.place(this.cart.state().items, this.payment, this.coupon()?.code).subscribe({
       next: (r) => {
         // Order persisted + paid -> empty the cart and show confirmation.
         this.cart.clear().subscribe();

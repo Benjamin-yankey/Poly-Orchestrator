@@ -177,6 +177,23 @@ export interface AdminUser {
   spent: number;
 }
 
+// A product review left by a shopper.
+export interface Review {
+  id: number;
+  rating: number;
+  comment: string;
+  created_at: string;
+  author?: string;
+}
+
+// A review as seen in the admin moderation tab (with product + author context).
+export interface AdminReview extends Review {
+  product_id: number;
+  product_name: string;
+  author_email: string;
+  approved: boolean;
+}
+
 // A marketing promo code applied at checkout for a percentage off the order.
 export interface Coupon {
   id: number;

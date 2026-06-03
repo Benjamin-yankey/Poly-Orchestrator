@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
+  AdminReview,
   AdminStats,
   AdminUser,
   AuditEntry,
@@ -112,5 +113,18 @@ export class AdminService {
 
   removeCoupon(id: number): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>(`/api/admin/coupons/${id}`);
+  }
+
+  // ---- review moderation ----
+  reviews(): Observable<{ reviews: AdminReview[] }> {
+    return this.http.get<{ reviews: AdminReview[] }>('/api/admin/reviews');
+  }
+
+  approveReview(id: number, approved: boolean): Observable<{ review: AdminReview }> {
+    return this.http.put<{ review: AdminReview }>(`/api/admin/reviews/${id}/approve`, { approved });
+  }
+
+  removeReview(id: number): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`/api/admin/reviews/${id}`);
   }
 }
