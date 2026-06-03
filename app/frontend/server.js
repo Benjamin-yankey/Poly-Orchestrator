@@ -2,7 +2,8 @@
 // Top tier. Serves the built Angular SPA and reverse-proxies /api/* to the two
 // backend microservices, discovered independently via env vars (no hard-coded
 // IPs). Routing is by path prefix:
-//     /api/products*   /api/categories*  /api/auth*  /api/orders*  /api/admin*
+//     /api/products*  /api/categories*  /api/listings*  /api/auth*  /api/orders*
+//     /api/admin*  /api/coupons*  /api/settings*
 //        -> Products / core API  (PRODUCTS_URL)
 //     /api/cart*       /api/visits*
 //        -> Cart service         (CART_URL)
@@ -30,7 +31,7 @@ const SPA_DIR = fs.existsSync(path.join(__dirname, "public", "index.html"))
 app.get("/health", (_req, res) => res.json({ status: "ok", tier: "frontend" }));
 
 // Pick the downstream service based on the request path prefix.
-const PRODUCTS_PREFIXES = ["/api/products", "/api/categories", "/api/auth", "/api/orders", "/api/admin"];
+const PRODUCTS_PREFIXES = ["/api/products", "/api/categories", "/api/listings", "/api/auth", "/api/orders", "/api/admin", "/api/coupons", "/api/settings"];
 const CART_PREFIXES = ["/api/cart", "/api/visits"];
 
 function targetFor(reqPath) {

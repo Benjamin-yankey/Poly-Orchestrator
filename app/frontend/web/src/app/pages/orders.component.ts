@@ -2,12 +2,13 @@ import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { OrderService } from '../core/order.service';
+import { IconComponent } from '../core/icon.component';
 import { CartItem, Order } from '../core/models';
 
 @Component({
   selector: 'app-orders',
   standalone: true,
-  imports: [CommonModule, RouterLink, DatePipe],
+  imports: [CommonModule, RouterLink, DatePipe, IconComponent],
   template: `
     <div class="container">
       <div class="page-head"><h1>Your orders</h1></div>
@@ -15,7 +16,7 @@ import { CartItem, Order } from '../core/models';
       @if (loading()) {
         <div class="spinner">Loading…</div>
       } @else if (orders().length === 0) {
-        <div class="empty"><div class="big">📦</div><p>You haven't placed any orders yet.</p><a class="btn" routerLink="/">Shop now</a></div>
+        <div class="empty"><div class="big"><app-icon name="orders" [size]="56" /></div><p>You haven't placed any orders yet.</p><a class="btn" routerLink="/">Shop now</a></div>
       } @else {
         @for (o of orders(); track o.id) {
           <div class="card" style="padding:18px 22px;margin-bottom:14px">
@@ -27,7 +28,9 @@ import { CartItem, Order } from '../core/models';
               </div>
               <div class="row">
                 <span class="price">\${{ (+o.total).toFixed(2) }}</span>
-                <span class="muted">{{ expanded() === o.id ? '▲' : '▼' }}</span>
+                <span class="muted" style="display:inline-flex">
+                  <app-icon [name]="expanded() === o.id ? 'chevron-up' : 'chevron-down'" [size]="18" />
+                </span>
               </div>
             </div>
             @if (expanded() === o.id) {
@@ -36,7 +39,7 @@ import { CartItem, Order } from '../core/models';
                 <tbody>
                   @for (it of items(); track it.productId) {
                     <tr>
-                      <td>{{ it.icon }} {{ it.name }}</td>
+                      <td>{{ it.name }}</td>
                       <td>\${{ (+it.price).toFixed(2) }}</td>
                       <td>{{ it.qty }}</td>
                       <td>\${{ (+it.price * it.qty).toFixed(2) }}</td>

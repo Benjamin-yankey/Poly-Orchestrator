@@ -1,28 +1,72 @@
-<nav class="navbar">
-  <div class="navbar-inner">
-    <a routerLink="/" class="brand">Shop<span class="dot">Now</span></a>
-    <div class="nav-links">
-      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Shop</a>
-      @if (auth.isLoggedIn()) {
-        <a routerLink="/orders" routerLinkActive="active">Orders</a>
-      }
-      @if (auth.isAdmin()) {
-        <a routerLink="/admin" routerLinkActive="active">Admin</a>
-      }
-      <a routerLink="/cart" class="cart-pill" title="Cart">
-        🛒 Cart
-        @if (cart.state().count > 0) {
-          <span class="badge">{{ cart.state().count }}</span>
-        }
+<!-- Mobile top bar: only shown on narrow screens; toggles the sidebar. -->
+<header class="topbar">
+  <button class="hamburger" (click)="toggleSidebar()" aria-label="Toggle menu">
+    <app-icon name="menu" [size]="22" />
+  </button>
+  <a routerLink="/" class="brand">Shop<span class="dot">Now</span></a>
+  <a routerLink="/cart" class="cart-mini" title="Cart">
+    <app-icon name="cart" [size]="24" />
+    @if (cart.state().count > 0) { <span class="badge">{{ cart.state().count }}</span> }
+  </a>
+</header>
+
+<!-- Dim overlay behind the sidebar on mobile. -->
+@if (sidebarOpen()) { <div class="scrim" (click)="closeSidebar()"></div> }
+
+<div class="app-shell">
+  <aside class="sidebar" [class.open]="sidebarOpen()">
+    <a routerLink="/" class="brand sidebar-brand" (click)="closeSidebar()">Shop<span class="dot">Now</span></a>
+
+    <nav class="side-nav" (click)="closeSidebar()">
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
+        <app-icon class="ic" name="shop" /> Shop
+      </a>
+      <a routerLink="/marketplace" routerLinkActive="active">
+        <app-icon class="ic" name="marketplace" /> Marketplace
       </a>
       @if (auth.isLoggedIn()) {
-        <span class="muted">Hi, {{ auth.user()?.name || auth.user()?.email }}</span>
-        <a href="javascript:void(0)" (click)="logout()">Logout</a>
+        <a routerLink="/sell" routerLinkActive="active">
+          <app-icon class="ic" name="sell" /> Sell an item
+        </a>
+      }
+      <a routerLink="/cart" routerLinkActive="active">
+        <app-icon class="ic" name="cart" /> Cart
+        @if (cart.state().count > 0) { <span class="badge">{{ cart.state().count }}</span> }
+      </a>
+      @if (auth.isLoggedIn()) {
+        <a routerLink="/orders" routerLinkActive="active">
+          <app-icon class="ic" name="orders" /> Orders
+        </a>
+      }
+      @if (auth.canViewAdmin()) {
+        <a routerLink="/admin" routerLinkActive="active">
+          <app-icon class="ic" name="admin" /> Admin
+        </a>
+      }
+    </nav>
+
+    <div class="sidebar-foot">
+      @if (auth.isLoggedIn()) {
+        <!-- Profile widget: present on every page via the shared shell. -->
+        <a routerLink="/profile" routerLinkActive="active" class="profile-card" (click)="closeSidebar()">
+          <span class="avatar">{{ initials() }}</span>
+          <span class="meta">
+            <strong>{{ auth.user()?.name || 'Your profile' }}</strong>
+            <span class="muted">{{ auth.user()?.email }}</span>
+          </span>
+        </a>
+        <a href="javascript:void(0)" class="foot-link" (click)="logout()">
+          <app-icon class="ic" name="logout" [size]="18" /> Logout
+        </a>
       } @else {
-        <a routerLink="/login" routerLinkActive="active">Login</a>
+        <a routerLink="/login" class="foot-link" (click)="closeSidebar()">
+          <app-icon class="ic" name="user" [size]="18" /> Login / Register
+        </a>
       }
     </div>
-  </div>
-</nav>
+  </aside>
 
-<router-outlet />
+  <main class="main">
+    <router-outlet />
+  </main>
+</div>

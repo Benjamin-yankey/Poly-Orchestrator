@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { authGuard, adminGuard } from './core/guards';
+import { authGuard, managementGuard } from './core/guards';
 
 export const routes: Routes = [
   {
@@ -10,6 +10,16 @@ export const routes: Routes = [
     path: 'product/:id',
     loadComponent: () =>
       import('./pages/product-detail.component').then((m) => m.ProductDetailComponent),
+  },
+  {
+    path: 'marketplace',
+    loadComponent: () =>
+      import('./pages/marketplace.component').then((m) => m.MarketplaceComponent),
+  },
+  {
+    path: 'sell',
+    canActivate: [authGuard],
+    loadComponent: () => import('./pages/sell.component').then((m) => m.SellComponent),
   },
   {
     path: 'cart',
@@ -34,8 +44,13 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/orders.component').then((m) => m.OrdersComponent),
   },
   {
+    path: 'profile',
+    canActivate: [authGuard],
+    loadComponent: () => import('./pages/profile.component').then((m) => m.ProfileComponent),
+  },
+  {
     path: 'admin',
-    canActivate: [authGuard, adminGuard],
+    canActivate: [authGuard, managementGuard],
     loadComponent: () => import('./pages/admin.component').then((m) => m.AdminComponent),
   },
   { path: '**', redirectTo: '' },

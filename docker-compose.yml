@@ -29,6 +29,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # Adminer — web UI to browse/edit the Postgres data at http://localhost:8082
+  # (Host 8080 is Jenkins, 8081 is the frontend.) Log in with:
+  #   System: PostgreSQL · Server: postgres · User: shopnow · Password: shopnow_pass · DB: shopnow
+  adminer:
+    image: adminer:4
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    ports:
+      - "127.0.0.1:8082:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # Products / core API microservice — owns Postgres (catalog, users, orders).
   products:
     build: ./app/products
@@ -59,7 +72,8 @@ services:
       PRODUCTS_URL: http://products:5001
       CART_URL: http://cart:5002
     ports:
-      - "8080:8080"
+      # Host 8081 -> container 8080. Host 8080 is reserved for Jenkins.
+      - "8081:8080"
     depends_on:
       - products
       - cart
