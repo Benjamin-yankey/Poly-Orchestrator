@@ -20,13 +20,6 @@ import { IconComponent } from '../core/icon.component';
         <h1>Welcome back</h1>
         <p class="muted">Sign in to your ShopNow account.</p>
 
-        <div class="alert info">
-          <strong>Demo logins</strong><br />
-          Customer — <code>demo&#64;shopnow.local</code> / <code>demo123</code><br />
-          Admin — <code>admin&#64;shopnow.local</code> / <code>admin123</code><br />
-          Staffing (read-only) — <code>staff&#64;shopnow.local</code> / <code>staff123</code>
-        </div>
-
         @if (error()) { <div class="alert error">{{ error() }}</div> }
 
         <form (ngSubmit)="submit()">

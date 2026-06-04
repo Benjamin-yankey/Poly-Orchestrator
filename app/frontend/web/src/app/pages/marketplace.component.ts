@@ -1,11 +1,12 @@
 import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { ListingService } from '../core/listing.service';
 import { AuthService } from '../core/auth.service';
 import { IconComponent } from '../core/icon.component';
 import { Listing } from '../core/models';
+import { formatPrice } from '../core/countries';
 
 // Public marketplace: browse items other users have posted and call the seller
 // to arrange the purchase. No cart — buying happens over the phone.
@@ -53,7 +54,7 @@ import { Listing } from '../core/models';
       } @else {
         <div class="grid">
           @for (l of listings(); track l.id) {
-            <div class="card product">
+            <div class="card product" (click)="open(l)" style="cursor:pointer">
               <div class="media">
                 @if (l.image) { <img [src]="l.image" [alt]="l.title" /> }
                 @else { <app-icon name="image" [size]="44" /> }
@@ -63,11 +64,11 @@ import { Listing } from '../core/models';
               <p class="desc">{{ l.description }}</p>
               <div class="seller muted">
                 <span><app-icon name="user" [size]="14" /> {{ l.seller_name || 'Seller' }}</span>
-                @if (l.location) { <span><app-icon name="location" [size]="14" /> {{ l.location }}</span> }
+                @if (l.location) { <span><app-icon name="location" [size]="14" /> {{ l.location }}{{ l.country ? ', ' + l.country : '' }}</span> }
               </div>
               <div class="row spread" style="margin-top:12px">
-                <span class="price">\${{ (+l.price).toFixed(2) }}</span>
-                <a class="btn sm success" [href]="'tel:' + l.phone" title="Call the seller">
+                <span class="price">{{ price(l) }}</span>
+                <a class="btn sm success" [href]="'tel:' + l.phone" title="Call the seller" (click)="$event.stopPropagation()">
                   <app-icon name="phone" [size]="14" /> {{ l.phone }}
                 </a>
               </div>
@@ -97,11 +98,23 @@ export class MarketplaceComponent implements OnInit {
   search = '';
   private debounce?: any;
 
-  constructor(private listingSvc: ListingService, public auth: AuthService) {}
+  constructor(
+    private listingSvc: ListingService,
+    public auth: AuthService,
+    private router: Router,
+  ) {}
 
   ngOnInit(): void {
     this.listingSvc.categories().subscribe((r) => this.categories.set(['All', ...r.categories]));
     this.load();
+  }
+
+  open(l: Listing): void {
+    this.router.navigate(['/marketplace', l.id]);
+  }
+
+  price(l: Listing): string {
+    return formatPrice(l.price, l.currency);
   }
 
   load(): void {

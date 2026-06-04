@@ -19,6 +19,12 @@ export class ListingService {
     return this.http.get<{ categories: string[] }>('/api/listings/categories');
   }
 
+  // The admin-managed category list (includes categories with no listings yet),
+  // used to populate the Category dropdown on the sell form.
+  managedCategories(): Observable<{ categories: { id: number; name: string }[] }> {
+    return this.http.get<{ categories: { id: number; name: string }[] }>('/api/listings/all-categories');
+  }
+
   get(id: number): Observable<{ listing: Listing }> {
     return this.http.get<{ listing: Listing }>(`/api/listings/${id}`);
   }

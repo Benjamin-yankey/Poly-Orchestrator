@@ -402,8 +402,20 @@ export interface Listing {
   description: string;
   phone: string;
   location: string;
+  // Country the item is sold in (drives phone dial code + city list) and the
+  // currency its price is quoted in (ISO 4217 code, e.g. 'GHS').
+  country?: string;
+  currency?: string;
   created_at: string;
   seller_id?: number;
   seller_name?: string;
   seller_email?: string;
+}
+
+// An admin-managed marketplace category (the sell form's Category dropdown).
+export interface ListingCategory {
+  id: number;
+  name: string;
+  created_at?: string;
+  listings?: number;
 }

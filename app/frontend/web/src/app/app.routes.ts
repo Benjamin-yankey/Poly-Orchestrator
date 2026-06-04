@@ -17,6 +17,11 @@ export const routes: Routes = [
       import('./pages/marketplace.component').then((m) => m.MarketplaceComponent),
   },
   {
+    path: 'marketplace/:id',
+    loadComponent: () =>
+      import('./pages/marketplace-detail.component').then((m) => m.MarketplaceDetailComponent),
+  },
+  {
     path: 'sell',
     canActivate: [authGuard],
     loadComponent: () => import('./pages/sell.component').then((m) => m.SellComponent),

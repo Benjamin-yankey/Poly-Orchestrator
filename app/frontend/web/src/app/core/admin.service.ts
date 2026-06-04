@@ -11,6 +11,7 @@ import {
   Coupon,
   Department,
   Listing,
+  ListingCategory,
   Order,
   OrderStatus,
   ReturnStatus,
@@ -99,6 +100,19 @@ export class AdminService {
 
   removeListing(id: number): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>(`/api/listings/${id}`);
+  }
+
+  // ---- marketplace categories (separate from the shop catalog) ----
+  listingCategories(): Observable<{ categories: ListingCategory[] }> {
+    return this.http.get<{ categories: ListingCategory[] }>('/api/admin/listing-categories');
+  }
+
+  addListingCategory(name: string): Observable<{ category: ListingCategory }> {
+    return this.http.post<{ category: ListingCategory }>('/api/admin/listing-categories', { name });
+  }
+
+  removeListingCategory(id: number): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`/api/admin/listing-categories/${id}`);
   }
 
   // ---- marketing / coupons ----

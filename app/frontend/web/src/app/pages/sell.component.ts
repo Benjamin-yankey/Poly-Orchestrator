@@ -4,9 +4,14 @@ import { FormsModule } from '@angular/forms';
 import { ListingService } from '../core/listing.service';
 import { IconComponent } from '../core/icon.component';
 import { Listing } from '../core/models';
+import { COUNTRIES, Country, findCountry, formatPrice } from '../core/countries';
 
 // "Sell" page: post a new item for sale and manage your own listings. Reachable
 // only when logged in (guarded by authGuard). Buyers will call the phone number.
+//
+// The seller picks a Country, which drives three fields: the Price currency, the
+// phone dial code, and the Location (city) dropdown. Category is an admin-managed
+// dropdown loaded from the backend.
 @Component({
   selector: 'app-sell',
   standalone: true,
@@ -48,25 +53,48 @@ import { Listing } from '../core/models';
           <label>Title</label>
           <input [(ngModel)]="form.title" placeholder="e.g. Used mountain bike" />
 
+          <label>Country</label>
+          <select [(ngModel)]="form.country" (ngModelChange)="onCountryChange()">
+            @for (c of countries; track c.iso) {
+              <option [value]="c.name">{{ c.name }} ({{ c.dial }})</option>
+            }
+          </select>
+
           <div class="field-row">
             <div>
-              <label>Price ($)</label>
+              <label>Price ({{ cc().symbol }})</label>
               <input type="number" min="0" step="0.01" [(ngModel)]="form.price" placeholder="0.00" />
             </div>
             <div>
               <label>Category</label>
-              <input [(ngModel)]="form.category" placeholder="e.g. Sports" />
+              <select [(ngModel)]="form.category">
+                @if (categories().length === 0) { <option value="">Loading…</option> }
+                @for (c of categories(); track c) { <option [value]="c">{{ c }}</option> }
+              </select>
             </div>
           </div>
 
           <div class="field-row">
             <div>
               <label>Phone (buyers call this)</label>
-              <input [(ngModel)]="form.phone" placeholder="e.g. +233 24 123 4567" />
+              <div class="phone-input">
+                <span class="dial">{{ cc().dial }}</span>
+                <input
+                  type="tel"
+                  inputmode="numeric"
+                  [(ngModel)]="phoneNational"
+                  (ngModelChange)="onPhoneInput()"
+                  placeholder="24 123 4567"
+                />
+              </div>
+              <small class="muted">Numbers only — e.g. {{ cc().dial }} 24 123 4567</small>
             </div>
             <div>
               <label>Location</label>
-              <input [(ngModel)]="form.location" placeholder="e.g. Accra" />
+              <select [(ngModel)]="form.location">
+                <option value="">Select a city…</option>
+                @for (city of cc().cities; track city) { <option [value]="city">{{ city }}</option> }
+              </select>
             </div>
           </div>
 
@@ -95,7 +123,7 @@ import { Listing } from '../core/models';
                 <div class="grow">
                   <strong>{{ l.title }}</strong>
                   <div class="muted line-meta">
-                    \${{ (+l.price).toFixed(2) }} · {{ l.category }}
+                    {{ price(l) }} · {{ l.category }}
                     <span class="meta-phone"><app-icon name="phone" [size]="13" /> {{ l.phone }}</span>
                   </div>
                 </div>
@@ -122,6 +150,13 @@ import { Listing } from '../core/models';
        display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
        border: none; border-radius: 999px; background: rgba(16,24,40,.65); color: #fff;
      }
+     .phone-input { display:flex; align-items:stretch; }
+     .phone-input .dial {
+       display:inline-flex; align-items:center; padding:0 12px; white-space:nowrap;
+       border:1px solid var(--border); border-right:none; border-radius:10px 0 0 10px;
+       background:var(--bg); color:var(--muted); font-weight:600;
+     }
+     .phone-input input { border-radius:0 10px 10px 0; flex:1; min-width:0; }
      .mine-line { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); }
      .mine-line:last-child { border-bottom:none; }
      .mine-line .thumb {
@@ -138,7 +173,11 @@ import { Listing } from '../core/models';
 export class SellComponent implements OnInit {
   // Cap uploads so the base64 payload stays well within the API body limit.
   private static readonly MAX_BYTES = 2 * 1024 * 1024;
-  form: Partial<Listing> = {};
+  readonly countries = COUNTRIES;
+  // Default to Ghana; country drives currency, dial code and the city list.
+  form: Partial<Listing> = { country: 'Ghana' };
+  phoneNational = '';
+  categories = signal<string[]>([]);
   mine = signal<Listing[]>([]);
   loadingMine = signal<boolean>(true);
   saving = signal<boolean>(false);
@@ -149,6 +188,33 @@ export class SellComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadMine();
+    this.listingSvc.managedCategories().subscribe((r) => {
+      const names = r.categories.map((c) => c.name);
+      this.categories.set(names);
+      if (!this.form.category && names.length) this.form.category = names[0];
+    });
+  }
+
+  // The currently selected country (falls back to the first in the list).
+  cc(): Country {
+    return findCountry(this.form.country) ?? COUNTRIES[0];
+  }
+
+  // Render a listing's price in its own stored currency.
+  price(l: Listing): string {
+    return formatPrice(l.price, l.currency);
+  }
+
+  onCountryChange(): void {
+    // City list changed; clear any city that no longer belongs to this country.
+    if (this.form.location && !this.cc().cities.includes(this.form.location)) {
+      this.form.location = '';
+    }
+  }
+
+  // Keep the national number digits-only as the user types.
+  onPhoneInput(): void {
+    this.phoneNational = (this.phoneNational || '').replace(/[^\d]/g, '');
   }
 
   loadMine(): void {
@@ -187,16 +253,29 @@ export class SellComponent implements OnInit {
   submit(): void {
     this.error.set('');
     this.success.set('');
-    if (!this.form.title || this.form.price == null || `${this.form.price}` === '' || !this.form.phone) {
-      this.error.set('Title, price and phone are required.');
+    const country = this.cc();
+    if (!this.form.title || this.form.price == null || `${this.form.price}` === '') {
+      this.error.set('Title and price are required.');
       return;
     }
+    if (this.phoneNational.length < 6 || this.phoneNational.length > 14) {
+      this.error.set('Enter a valid phone number (digits only, e.g. 24 123 4567).');
+      return;
+    }
+    // Compose the international phone and stamp the country's currency.
+    const payload: Partial<Listing> = {
+      ...this.form,
+      phone: `${country.dial} ${this.phoneNational}`,
+      currency: country.currency,
+    };
     this.saving.set(true);
-    this.listingSvc.create(this.form).subscribe({
+    this.listingSvc.create(payload).subscribe({
       next: (r) => {
         this.saving.set(false);
         this.success.set(`"${r.listing.title}" is now live on the marketplace.`);
-        this.form = {};
+        // Reset, keeping the chosen country/category for the next post.
+        this.form = { country: country.name, category: this.form.category };
+        this.phoneNational = '';
         this.loadMine();
       },
       error: (e) => {

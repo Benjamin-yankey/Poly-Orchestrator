@@ -207,6 +207,17 @@ async function initDb() {
     -- Sellers now upload a real photo (stored as a base64 data URL) instead of
     -- picking an emoji. Add the column for databases created before this change.
     ALTER TABLE listings ADD COLUMN IF NOT EXISTS image TEXT NOT NULL DEFAULT '';
+    -- Listings are now country-aware: the seller picks a country (drives the phone
+    -- dial code + the city dropdown) and the price is in that country's currency.
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS country  TEXT NOT NULL DEFAULT 'Ghana';
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'GHS';
+    -- Admin-managed marketplace categories (separate from the shop catalog). The
+    -- sell form's Category dropdown reads from this list.
+    CREATE TABLE IF NOT EXISTS listing_categories (
+      id         SERIAL PRIMARY KEY,
+      name       TEXT UNIQUE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     -- The catalog gained real product photos (base64 data URL); the emoji icon is
     -- now just a fallback. Add the column for databases created before this change.
     ALTER TABLE products ADD COLUMN IF NOT EXISTS image TEXT NOT NULL DEFAULT '';
@@ -357,10 +368,18 @@ async function initDb() {
     ) AS v(name, price, category, icon, description, stock)
     WHERE NOT EXISTS (SELECT 1 FROM products);`;
 
+  // Default marketplace categories (admin can add/remove more later).
+  const seedListingCategories = `
+    INSERT INTO listing_categories (name)
+    VALUES ('General'),('Electronics'),('Vehicles'),('Furniture'),('Fashion'),
+           ('Property'),('Home & Garden'),('Sports'),('Books'),('Services'),('Other')
+    ON CONFLICT (name) DO NOTHING;`;
+
   for (let attempt = 1; attempt <= 15; attempt++) {
     try {
       await pool.query(ddl);
       await pool.query(seedProducts);
+      await pool.query(seedListingCategories);
       await seedUsers();
       await seedSettings();
       console.log("Postgres ready; catalog, users and orders schema seeded.");
@@ -591,7 +610,8 @@ app.get("/api/listings", async (req, res) => {
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const { rows } = await pool.query(
       `SELECT l.id, l.title, l.price, l.category, l.image, l.description,
-              l.phone, l.location, l.created_at, l.seller_id, u.name AS seller_name
+              l.phone, l.location, l.country, l.currency, l.created_at,
+              l.seller_id, u.name AS seller_name
          FROM listings l JOIN users u ON u.id = l.seller_id
          ${where} ORDER BY l.id DESC`,
       params
@@ -612,11 +632,24 @@ app.get("/api/listings/categories", async (_req, res) => {
   }
 });
 
+// The full admin-managed category list (for the sell form's dropdown). Unlike
+// /categories above, this includes categories that have no listings yet. Defined
+// before /:id so Express doesn't treat "all-categories" as a listing id.
+app.get("/api/listings/all-categories", async (_req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT id, name FROM listing_categories ORDER BY name");
+    res.json({ categories: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // The caller's own listings.
 app.get("/api/listings/mine", authRequired, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, title, price, category, image, description, phone, location, created_at
+      `SELECT id, title, price, category, image, description, phone, location,
+              country, currency, created_at
          FROM listings WHERE seller_id=$1 ORDER BY id DESC`,
       [req.user.sub]
     );
@@ -631,7 +664,8 @@ app.get("/api/listings/:id", async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT l.id, l.title, l.price, l.category, l.image, l.description,
-              l.phone, l.location, l.created_at, l.seller_id, u.name AS seller_name
+              l.phone, l.location, l.country, l.currency, l.created_at,
+              l.seller_id, u.name AS seller_name
          FROM listings l JOIN users u ON u.id = l.seller_id
         WHERE l.id=$1`,
       [req.params.id]
@@ -646,21 +680,28 @@ app.get("/api/listings/:id", async (req, res) => {
 // Post a listing. Any authenticated user may sell; phone is how buyers reach them.
 app.post("/api/listings", authRequired, async (req, res) => {
   try {
-    const { title, price, category, image, description, phone, location } = req.body || {};
+    const { title, price, category, image, description, phone, location, country, currency } =
+      req.body || {};
     if (!title || price == null || !phone) {
       return res.status(400).json({ error: "title, price and phone are required" });
     }
     if (Number(price) < 0 || Number.isNaN(Number(price))) {
       return res.status(400).json({ error: "price must be a non-negative number" });
     }
+    // Phone must be an international number: a leading +dial code then 6-14 digits
+    // (spaces allowed for readability, e.g. "+233 24 123 4567").
+    const digits = String(phone).replace(/[^\d]/g, "");
+    if (!String(phone).trim().startsWith("+") || digits.length < 8 || digits.length > 15) {
+      return res.status(400).json({ error: "phone must be a valid international number, e.g. +233 24 123 4567" });
+    }
     // The image (optional) is a base64 data URL captured from the seller's upload.
     if (image && !isDataImage(image)) {
       return res.status(400).json({ error: "image must be a base64-encoded data URL" });
     }
     const { rows } = await pool.query(
-      `INSERT INTO listings (seller_id, title, price, category, image, description, phone, location)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING id, title, price, category, image, description, phone, location, created_at, seller_id`,
+      `INSERT INTO listings (seller_id, title, price, category, image, description, phone, location, country, currency)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING id, title, price, category, image, description, phone, location, country, currency, created_at, seller_id`,
       [
         req.user.sub,
         title,
@@ -670,6 +711,8 @@ app.post("/api/listings", authRequired, async (req, res) => {
         description || "",
         phone,
         location || "",
+        country || "Ghana",
+        currency || "GHS",
       ]
     );
     res.status(201).json({ listing: rows[0] });
@@ -1601,12 +1644,62 @@ app.get("/api/admin/listings", authRequired, managementRead, async (_req, res) =
   try {
     const { rows } = await pool.query(
       `SELECT l.id, l.title, l.price, l.category, l.image, l.description,
-              l.phone, l.location, l.created_at, l.seller_id,
+              l.phone, l.location, l.country, l.currency, l.created_at, l.seller_id,
               u.name AS seller_name, u.email AS seller_email
          FROM listings l JOIN users u ON u.id = l.seller_id
         ORDER BY l.id DESC`
     );
     res.json({ listings: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Admin marketplace categories (the sell form's Category dropdown) ----------
+
+app.get("/api/admin/listing-categories", authRequired, managementRead, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.id, c.name, c.created_at,
+              (SELECT COUNT(*)::int FROM listings l WHERE l.category = c.name) AS listings
+         FROM listing_categories c ORDER BY c.name`
+    );
+    res.json({ categories: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/admin/listing-categories", authRequired, adminRequired, async (req, res) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "category name is required" });
+    let rows;
+    try {
+      ({ rows } = await pool.query(
+        "INSERT INTO listing_categories (name) VALUES ($1) RETURNING id, name, created_at",
+        [name]
+      ));
+    } catch (e) {
+      if (e.code === "23505") return res.status(409).json({ error: "category already exists" });
+      throw e;
+    }
+    audit(req.user, "listing_category.create", "listing_category:" + rows[0].id, name);
+    res.status(201).json({ category: { ...rows[0], listings: 0 } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Delete a category. Existing listings keep their (now free-text) category value.
+app.delete("/api/admin/listing-categories/:id", authRequired, adminRequired, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query("DELETE FROM listing_categories WHERE id=$1", [
+      Number(req.params.id),
+    ]);
+    if (!rowCount) return res.status(404).json({ error: "category not found" });
+    audit(req.user, "listing_category.delete", "listing_category:" + req.params.id, "");
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

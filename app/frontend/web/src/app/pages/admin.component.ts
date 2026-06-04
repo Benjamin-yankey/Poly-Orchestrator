@@ -7,6 +7,7 @@ import { SupportService } from '../core/support.service';
 import { AuthService } from '../core/auth.service';
 import { IconComponent } from '../core/icon.component';
 import { SettingsService } from '../core/settings.service';
+import { formatPrice } from '../core/countries';
 import {
   AdminReturn,
   AdminReview,
@@ -20,6 +21,7 @@ import {
   departmentLabel,
   DEPARTMENT_INFO,
   Listing,
+  ListingCategory,
   Order,
   OrderStatus,
   ORDER_STATUSES,
@@ -42,6 +44,7 @@ type Tab =
   | 'users'
   | 'roles'
   | 'listings'
+  | 'listing-categories'
   | 'reviews'
   | 'support'
   | 'coupons'
@@ -82,6 +85,7 @@ type Tab =
         <button class="tab" [class.active]="tab() === 'users'" (click)="go('users')"><app-icon name="user" [size]="16" /> Users</button>
         <button class="tab" [class.active]="tab() === 'roles'" (click)="go('roles')"><app-icon name="lock" [size]="16" /> Roles</button>
         <button class="tab" [class.active]="tab() === 'listings'" (click)="go('listings')"><app-icon name="marketplace" [size]="16" /> Listings</button>
+        <button class="tab" [class.active]="tab() === 'listing-categories'" (click)="go('listing-categories')"><app-icon name="tag" [size]="16" /> Mkt. categories</button>
         <button class="tab" [class.active]="tab() === 'reviews'" (click)="go('reviews')"><app-icon name="star" [size]="16" /> Reviews</button>
         <button class="tab" [class.active]="tab() === 'support'" (click)="go('support')"><app-icon name="message" [size]="16" /> Support</button>
         <button class="tab" [class.active]="tab() === 'security'" (click)="go('security')"><app-icon name="shield" [size]="16" /> Security</button>
@@ -513,12 +517,41 @@ type Tab =
                   <span style="font-size:.78rem">{{ l.seller_email }}</span>
                 </div>
                 <div class="row spread" style="margin-top:12px">
-                  <span class="price">\${{ (+l.price).toFixed(2) }}</span>
+                  <span class="price">{{ listingPrice(l) }}</span>
                   @if (canManage()) { <button class="btn sm danger" (click)="delListing(l)">Remove</button> }
                 </div>
               </div>
             }
           </div>
+        }
+      }
+      <!-- ===================== MARKETPLACE CATEGORIES ===================== -->
+      @if (tab() === 'listing-categories') {
+        <p class="muted" style="margin-top:0">Categories sellers choose from when posting to the marketplace. Separate from the shop catalog.</p>
+        @if (catError()) { <div class="alert error">{{ catError() }}</div> }
+        @if (canManage()) {
+          <div class="row" style="gap:8px;margin-bottom:16px;max-width:420px">
+            <input [(ngModel)]="newCategory" placeholder="New category name" (keyup.enter)="addCategory()" style="flex:1" />
+            <button class="btn" [disabled]="savingCat()" (click)="addCategory()">Add</button>
+          </div>
+        }
+        @if (listingCategories().length === 0) {
+          <div class="empty"><div class="big"><app-icon name="tag" [size]="56" /></div><p>No categories yet.</p></div>
+        } @else {
+          <table class="data">
+            <thead><tr><th>Category</th><th>Listings</th><th></th></tr></thead>
+            <tbody>
+              @for (c of listingCategories(); track c.id) {
+                <tr>
+                  <td><strong>{{ c.name }}</strong></td>
+                  <td>{{ c.listings || 0 }}</td>
+                  <td style="text-align:right">
+                    @if (canManage()) { <button class="btn sm danger" (click)="removeCategory(c)">Delete</button> }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
         }
       }
       <!-- ============================ REVIEWS ============================ -->
@@ -839,6 +872,10 @@ export class AdminComponent implements OnInit {
   orders = signal<Order[]>([]);
   users = signal<AdminUser[]>([]);
   listings = signal<Listing[]>([]);
+  listingCategories = signal<ListingCategory[]>([]);
+  newCategory = '';
+  savingCat = signal(false);
+  catError = signal('');
   msg = signal('');
   error = signal('');
   form: Partial<Product> = this.blank();
@@ -936,6 +973,7 @@ export class AdminComponent implements OnInit {
     // The Roles tab shows per-role user counts, so it needs the users loaded too.
     if ((tab === 'users' || tab === 'roles') && this.users().length === 0) this.loadUsers();
     if (tab === 'listings' && this.listings().length === 0) this.loadListings();
+    if (tab === 'listing-categories') this.loadListingCategories();
     if (tab === 'security') this.loadAudit();
     if (tab === 'coupons') this.loadCoupons();
     if (tab === 'settings') this.loadSettings();
@@ -982,6 +1020,37 @@ export class AdminComponent implements OnInit {
   }
   loadListings(): void {
     this.admin.listings().subscribe((r) => this.listings.set(r.listings));
+  }
+  // Render an admin-listed item's price in its own stored currency.
+  listingPrice(l: Listing): string {
+    return formatPrice(l.price, l.currency);
+  }
+  loadListingCategories(): void {
+    this.admin.listingCategories().subscribe((r) => this.listingCategories.set(r.categories));
+  }
+  addCategory(): void {
+    const name = this.newCategory.trim();
+    this.catError.set('');
+    if (!name) return;
+    this.savingCat.set(true);
+    this.admin.addListingCategory(name).subscribe({
+      next: () => {
+        this.savingCat.set(false);
+        this.newCategory = '';
+        this.loadListingCategories();
+      },
+      error: (e) => {
+        this.savingCat.set(false);
+        this.catError.set(e?.error?.error || 'Could not add category.');
+      },
+    });
+  }
+  removeCategory(c: ListingCategory): void {
+    if (!confirm(`Delete the "${c.name}" category?`)) return;
+    this.admin.removeListingCategory(c.id).subscribe({
+      next: () => this.loadListingCategories(),
+      error: (e) => this.catError.set(e?.error?.error || 'Could not delete category.'),
+    });
   }
   loadAudit(): void {
     this.admin.audit().subscribe((r) => this.audit.set(r.entries));
