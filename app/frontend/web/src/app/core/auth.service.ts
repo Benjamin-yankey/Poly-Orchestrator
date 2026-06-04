@@ -1,7 +1,7 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap } from 'rxjs';
-import { AuthResponse, ProfileUpdate, User } from './models';
+import { AuthResponse, Capability, Department, departmentHasCap, ProfileUpdate, User } from './models';
 
 const TOKEN_KEY = 'shopnow_token';
 
@@ -16,6 +16,10 @@ export class AuthService {
   readonly canViewAdmin = computed(
     () => this.user()?.role === 'admin' || this.user()?.role === 'staffing_team'
   );
+  // The employee's department (null for non-employees). Drives capability gating.
+  readonly department = computed<Department | null>(() => this.user()?.department ?? null);
+  // True for an internal employee — the role that owns the /employee dashboard.
+  readonly isEmployee = computed(() => this.user()?.role === 'employee');
 
   constructor(private http: HttpClient) {
     // If a token survived a refresh, re-hydrate the profile from the server.
@@ -29,6 +33,16 @@ export class AuthService {
 
   get token(): string | null {
     return localStorage.getItem(TOKEN_KEY);
+  }
+
+  // Does the signed-in user hold an operational capability? Admins hold every
+  // capability; employees hold those granted by their department; everyone else
+  // holds none. Mirrors requireCap on the products API — this only gates the UI.
+  hasCap(cap: Capability): boolean {
+    const u = this.user();
+    if (!u) return false;
+    if (u.role === 'admin') return true;
+    return u.role === 'employee' && departmentHasCap(u.department ?? null, cap);
   }
 
   login(email: string, password: string): Observable<AuthResponse> {

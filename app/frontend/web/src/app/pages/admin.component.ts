@@ -16,6 +16,9 @@ import {
   AuditEntry,
   CartItem,
   Coupon,
+  Department,
+  departmentLabel,
+  DEPARTMENT_INFO,
   Listing,
   Order,
   OrderStatus,
@@ -399,6 +402,15 @@ type Tab =
                     @for (r of roleInfo; track r.key) { <option [value]="r.key">{{ r.label }}</option> }
                   </select>
                 </div>
+                @if (newUser.role === 'employee') {
+                  <div>
+                    <label>Department</label>
+                    <select [(ngModel)]="newUser.department">
+                      <option [ngValue]="null">— none —</option>
+                      @for (d of departmentInfo; track d.key) { <option [ngValue]="d.key">{{ d.label }}</option> }
+                    </select>
+                  </div>
+                }
               </div>
               <button class="btn" style="margin-top:16px" [disabled]="savingUser()" (click)="createUser()">
                 {{ savingUser() ? 'Creating…' : 'Create account' }}
@@ -419,7 +431,12 @@ type Tab =
                     @if (!u.active) { <span class="tag status-cancelled">disabled</span> }
                     <br /><span class="muted" style="font-size:.8rem">{{ u.email }}</span>
                   </td>
-                  <td><span class="tag" [class.role-admin]="u.role === 'admin'" [class.role-cust]="u.role !== 'admin'">{{ roleLabel(u.role) }}</span></td>
+                  <td>
+                    <span class="tag" [class.role-admin]="u.role === 'admin'" [class.role-cust]="u.role !== 'admin'">{{ roleLabel(u.role) }}</span>
+                    @if (u.role === 'employee') {
+                      <br /><span class="muted" style="font-size:.78rem">{{ departmentLabel(u.department) }}</span>
+                    }
+                  </td>
                   <td>{{ u.orders }}</td>
                   <td>\${{ u.spent.toFixed(2) }}</td>
                   <td>{{ u.created_at | date: 'mediumDate' }}</td>
@@ -432,6 +449,13 @@ type Tab =
                                 title="{{ u.id === auth.user()?.id ? 'You cannot change your own role' : 'Change role' }}">
                           @for (r of roleInfo; track r.key) { <option [value]="r.key">{{ r.label }}</option> }
                         </select>
+                        @if (u.role === 'employee') {
+                          <select class="role-select" [ngModel]="u.department ?? null"
+                                  (ngModelChange)="setDepartment(u, $event)" title="Assign department">
+                            <option [ngValue]="null">— no department —</option>
+                            @for (d of departmentInfo; track d.key) { <option [ngValue]="d.key">{{ d.label }}</option> }
+                          </select>
+                        }
                         <button class="btn ghost sm" (click)="resetPwd(u)">Reset PW</button>
                         <button class="btn ghost sm" [disabled]="u.id === auth.user()?.id" (click)="toggleActive(u)">{{ u.active ? 'Disable' : 'Enable' }}</button>
                         <button class="btn ghost sm" style="color:var(--danger)" [disabled]="u.id === auth.user()?.id" (click)="delUser(u)">Delete</button>
@@ -862,11 +886,15 @@ export class AdminComponent implements OnInit {
 
   // Role catalog for the Roles tab and the Users role <select>.
   roleInfo = ROLE_INFO;
+  // Department catalog for the employee department <select>.
+  departmentInfo = DEPARTMENT_INFO;
+  departmentLabel = departmentLabel;
 
   // Admin "create user" form state.
   creating = signal(false);
   savingUser = signal(false);
-  newUser: { name: string; email: string; password: string; role: Role } = this.blankUser();
+  newUser: { name: string; email: string; password: string; role: Role; department: Department | null } =
+    this.blankUser();
 
   // Tallest bar in the revenue chart drives the height scale.
   private maxRevenue = computed(() =>
@@ -1283,8 +1311,8 @@ export class AdminComponent implements OnInit {
   }
 
   // ---- user / role management ----
-  private blankUser(): { name: string; email: string; password: string; role: Role } {
-    return { name: '', email: '', password: '', role: 'employee' };
+  private blankUser(): { name: string; email: string; password: string; role: Role; department: Department | null } {
+    return { name: '', email: '', password: '', role: 'employee', department: null };
   }
 
   toggleCreate(): void {
@@ -1300,7 +1328,13 @@ export class AdminComponent implements OnInit {
     if (u.password.length < 6) return this.error.set('Password must be at least 6 characters.');
     this.savingUser.set(true);
     this.admin
-      .createUser({ name: u.name.trim(), email: u.email.trim(), password: u.password, role: u.role })
+      .createUser({
+        name: u.name.trim(),
+        email: u.email.trim(),
+        password: u.password,
+        role: u.role,
+        department: u.role === 'employee' ? u.department : null,
+      })
       .subscribe({
         next: (r) => {
           this.savingUser.set(false);
@@ -1332,6 +1366,22 @@ export class AdminComponent implements OnInit {
       },
       error: (e) => {
         this.error.set(e?.error?.error || 'Could not change role');
+        this.loadUsers();
+      },
+    });
+  }
+
+  // Assign an employee's department — this is what unlocks their dashboard areas.
+  setDepartment(u: AdminUser, department: Department | null): void {
+    this.error.set('');
+    if ((u.department ?? null) === department) return;
+    this.admin.setDepartment(u.id, department).subscribe({
+      next: () => {
+        this.flash(`${u.name || u.email} → ${this.departmentLabel(department)}`);
+        this.loadUsers();
+      },
+      error: (e) => {
+        this.error.set(e?.error?.error || 'Could not change department');
         this.loadUsers();
       },
     });

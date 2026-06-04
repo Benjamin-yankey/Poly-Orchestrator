@@ -19,12 +19,17 @@ import { Product, effectivePrice, hasDiscount } from '../core/models';
       <div class="page-head">
         <div>
           <h1>{{ settings.current()['store_name'] || 'Browse the store' }}</h1>
-          <p class="muted">Quality gear for your desk. Served by <code>{{ servedBy() || '…' }}</code>.</p>
+          <p class="muted">
+            Welcome to {{ settings.current()['store_name'] || 'ShopNow' }} —
+            Everything you need, delivered right to your doorstep.
+          </p>
         </div>
       </div>
 
       @if (settings.current()['banner']) {
-        <div class="alert info" style="margin-bottom:18px">{{ settings.current()['banner'] }}</div>
+        <div class="alert info" style="margin-bottom:18px">
+          {{ settings.current()['banner'] }}
+        </div>
       }
 
       <div class="toolbar">
@@ -38,7 +43,13 @@ import { Product, effectivePrice, hasDiscount } from '../core/models';
         </div>
         <div class="chips">
           @for (c of categories(); track c) {
-            <button class="chip" [class.active]="c === category()" (click)="setCategory(c)">{{ c }}</button>
+            <button
+              class="chip"
+              [class.active]="c === category()"
+              (click)="setCategory(c)"
+            >
+              {{ c }}
+            </button>
           }
         </div>
       </div>
@@ -46,20 +57,31 @@ import { Product, effectivePrice, hasDiscount } from '../core/models';
       @if (loading()) {
         <div class="spinner">Loading products…</div>
       } @else if (products().length === 0) {
-        <div class="empty"><div class="big"><app-icon name="search" [size]="56" /></div><p>No products match your search.</p></div>
+        <div class="empty">
+          <div class="big"><app-icon name="search" [size]="56" /></div>
+          <p>No products match your search.</p>
+        </div>
       } @else {
         <div class="grid">
           @for (p of products(); track p.id) {
             <div class="card product" (click)="open(p)">
               <div class="media">
-                @if (p.image) { <img [src]="p.image" [alt]="p.name" /> }
-                @else if (p.icon) { <span class="emoji">{{ p.icon }}</span> }
-                @else { <app-icon name="image" [size]="44" /> }
+                @if (p.image) {
+                  <img [src]="p.image" [alt]="p.name" />
+                } @else if (p.icon) {
+                  <span class="emoji">{{ p.icon }}</span>
+                } @else {
+                  <app-icon name="image" [size]="44" />
+                }
                 <button
                   class="wish"
                   [class.on]="wishlist.has(p.id)"
                   (click)="toggleWish(p, $event)"
-                  [attr.aria-label]="wishlist.has(p.id) ? 'Remove from wishlist' : 'Add to wishlist'"
+                  [attr.aria-label]="
+                    wishlist.has(p.id)
+                      ? 'Remove from wishlist'
+                      : 'Add to wishlist'
+                  "
                   title="Wishlist"
                 >
                   <app-icon name="heart" [size]="18" />
@@ -70,7 +92,12 @@ import { Product, effectivePrice, hasDiscount } from '../core/models';
               <p class="desc">{{ p.description }}</p>
               <div class="row spread">
                 @if (discounted(p)) {
-                  <span class="price"><s class="muted" style="font-weight:400;font-size:.82rem">\${{ (+p.price).toFixed(2) }}</s> \${{ eff(p).toFixed(2) }}</span>
+                  <span class="price"
+                    ><s class="muted" style="font-weight:400;font-size:.82rem"
+                      >\${{ (+p.price).toFixed(2) }}</s
+                    >
+                    \${{ eff(p).toFixed(2) }}</span
+                  >
                 } @else {
                   <span class="price">\${{ (+p.price).toFixed(2) }}</span>
                 }
@@ -81,20 +108,51 @@ import { Product, effectivePrice, hasDiscount } from '../core/models';
         </div>
       }
 
-      @if (toast()) { <div class="alert ok" style="position:fixed;bottom:20px;right:20px;z-index:60">{{ toast() }}</div> }
+      @if (toast()) {
+        <div
+          class="alert ok"
+          style="position:fixed;bottom:20px;right:20px;z-index:60"
+        >
+          {{ toast() }}
+        </div>
+      }
     </div>
   `,
   styles: [
-    `.product .media { position:relative; }
-     .wish {
-       position:absolute; top:8px; right:8px; width:34px; height:34px; border-radius:999px;
-       display:flex; align-items:center; justify-content:center; cursor:pointer;
-       background:rgba(255,255,255,.9); border:1px solid var(--border); color:var(--muted);
-       box-shadow:0 1px 4px rgba(0,0,0,.08); transition:color .15s, transform .1s;
-     }
-     .wish:hover { transform:scale(1.08); color:var(--danger, #dc2626); }
-     .wish.on { color:#dc2626; }
-     .wish.on app-icon ::ng-deep svg { fill:#dc2626; }`,
+    `
+      .product .media {
+        position: relative;
+      }
+      .wish {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 34px;
+        height: 34px;
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+        transition:
+          color 0.15s,
+          transform 0.1s;
+      }
+      .wish:hover {
+        transform: scale(1.08);
+        color: var(--danger, #dc2626);
+      }
+      .wish.on {
+        color: #dc2626;
+      }
+      .wish.on app-icon ::ng-deep svg {
+        fill: #dc2626;
+      }
+    `,
   ],
 })
 export class HomeComponent implements OnInit {
@@ -117,11 +175,13 @@ export class HomeComponent implements OnInit {
     public wishlist: WishlistService,
     private auth: AuthService,
     public settings: SettingsService,
-    private router: Router
+    private router: Router,
   ) {}
 
   ngOnInit(): void {
-    this.productSvc.categories().subscribe((r) => this.categories.set(['All', ...r.categories]));
+    this.productSvc
+      .categories()
+      .subscribe((r) => this.categories.set(['All', ...r.categories]));
     this.settings.load();
     this.load();
   }
@@ -159,8 +219,14 @@ export class HomeComponent implements OnInit {
       this.router.navigate(['/login'], { queryParams: { redirect: '/' } });
       return;
     }
-    const op = this.wishlist.has(p.id) ? this.wishlist.remove(p.id) : this.wishlist.add(p);
-    op.subscribe(() => this.flash(this.wishlist.has(p.id) ? `Saved ${p.name}` : `Removed ${p.name}`));
+    const op = this.wishlist.has(p.id)
+      ? this.wishlist.remove(p.id)
+      : this.wishlist.add(p);
+    op.subscribe(() =>
+      this.flash(
+        this.wishlist.has(p.id) ? `Saved ${p.name}` : `Removed ${p.name}`,
+      ),
+    );
   }
 
   add(p: Product, ev: Event): void {
@@ -170,7 +236,9 @@ export class HomeComponent implements OnInit {
       return;
     }
     // Add at the effective (post-discount) price so checkout charges the sale price.
-    this.cart.add({ ...p, price: this.eff(p) }).subscribe(() => this.flash(`${p.name} added to cart`));
+    this.cart
+      .add({ ...p, price: this.eff(p) })
+      .subscribe(() => this.flash(`${p.name} added to cart`));
   }
 
   private flash(msg: string): void {

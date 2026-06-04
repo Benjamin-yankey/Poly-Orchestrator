@@ -26,3 +26,13 @@ export const managementGuard: CanActivateFn = () => {
   if (auth.canViewAdmin()) return true;
   return router.createUrlTree(['/']);
 };
+
+// Allow the employee dashboard for internal employees and admins. Staffing team
+// uses the read-only admin console; customers are bounced home. (Individual tabs
+// inside the dashboard are further gated on capabilities — see AuthService.hasCap.)
+export const employeeGuard: CanActivateFn = () => {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+  if (auth.isEmployee() || auth.isAdmin()) return true;
+  return router.createUrlTree(['/']);
+};

@@ -49,6 +49,11 @@
           <app-icon class="ic" name="message" /> Support
         </a>
       }
+      @if (auth.isEmployee() || auth.isAdmin()) {
+        <a routerLink="/employee" routerLinkActive="active">
+          <app-icon class="ic" name="inbox" /> Employee
+        </a>
+      }
       @if (auth.canViewAdmin()) {
         <a routerLink="/admin" routerLinkActive="active">
           <app-icon class="ic" name="admin" /> Admin

@@ -11,7 +11,16 @@
 const express = require("express");
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
-const { signToken, authRequired, adminRequired, managementRead, ROLES } = require("./auth");
+const {
+  signToken,
+  authRequired,
+  adminRequired,
+  managementRead,
+  requireCap,
+  requireCapRead,
+  ROLES,
+} = require("./auth");
+const { DEPARTMENTS, hasCap } = require("./capabilities");
 
 const app = express();
 app.disable("x-powered-by");
@@ -34,6 +43,9 @@ const publicUser = (u) => ({
   email: u.email,
   name: u.name,
   role: u.role,
+  // Only set for internal employees; drives the employee dashboard's capability
+  // gating. null for admins/staffing/customers.
+  department: u.department || null,
   created_at: u.created_at,
 });
 
@@ -206,6 +218,9 @@ async function initDb() {
     -- Accounts can be disabled (kept for history) instead of deleted. A disabled
     -- account cannot log in. Add the column for databases created before this.
     ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+    -- Employees belong to an operational department (support, warehouse, …) that
+    -- decides which dashboard areas they can use. NULL for non-employee roles.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS department TEXT;
     -- Audit trail: every admin mutation and every login is appended here so the
     -- Security tab can show who did what, when.
     CREATE TABLE IF NOT EXISTS audit_log (
@@ -361,17 +376,19 @@ async function initDb() {
 // Seed a default admin + demo customer so the app is usable out of the box.
 async function seedUsers() {
   const seeds = [
-    { email: "admin@shopnow.local", password: "admin123", name: "Store Admin", role: "admin" },
-    { email: "staff@shopnow.local", password: "staff123", name: "Staffing Team", role: "staffing_team" },
-    { email: "employee@shopnow.local", password: "employee123", name: "Provisioned Employee", role: "employee" },
-    { email: "demo@shopnow.local", password: "demo123", name: "Demo Customer", role: "customer" },
+    { email: "admin@shopnow.local", password: "admin123", name: "Store Admin", role: "admin", department: null },
+    { email: "staff@shopnow.local", password: "staff123", name: "Staffing Team", role: "staffing_team", department: null },
+    { email: "employee@shopnow.local", password: "employee123", name: "Order Processing Employee", role: "employee", department: "order_processing" },
+    { email: "warehouse@shopnow.local", password: "warehouse123", name: "Warehouse Employee", role: "employee", department: "warehouse" },
+    { email: "support@shopnow.local", password: "support123", name: "Support Employee", role: "employee", department: "support" },
+    { email: "demo@shopnow.local", password: "demo123", name: "Demo Customer", role: "customer", department: null },
   ];
   for (const u of seeds) {
     const hash = await bcrypt.hash(u.password, 10);
     await pool.query(
-      `INSERT INTO users (email, password_hash, name, role)
-       VALUES ($1,$2,$3,$4) ON CONFLICT (email) DO NOTHING`,
-      [u.email, hash, u.name, u.role]
+      `INSERT INTO users (email, password_hash, name, role, department)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (email) DO NOTHING`,
+      [u.email, hash, u.name, u.role, u.department]
     );
   }
 }
@@ -496,7 +513,7 @@ app.post("/api/products/:id/reviews", authRequired, async (req, res) => {
 });
 
 // ---- Admin catalog management -------------------------------------------------
-app.post("/api/products", authRequired, adminRequired, async (req, res) => {
+app.post("/api/products", authRequired, requireCap("products.manage"), async (req, res) => {
   try {
     const { name, price, category, icon, image, description, stock, discount_pct } = req.body || {};
     if (!name || price == null) return res.status(400).json({ error: "name and price are required" });
@@ -516,7 +533,7 @@ app.post("/api/products", authRequired, adminRequired, async (req, res) => {
   }
 });
 
-app.put("/api/products/:id", authRequired, adminRequired, async (req, res) => {
+app.put("/api/products/:id", authRequired, requireCap("products.manage"), async (req, res) => {
   try {
     const { name, price, category, icon, image, description, stock, discount_pct } = req.body || {};
     if (image && !isDataImage(image)) {
@@ -542,7 +559,7 @@ app.put("/api/products/:id", authRequired, adminRequired, async (req, res) => {
   }
 });
 
-app.delete("/api/products/:id", authRequired, adminRequired, async (req, res) => {
+app.delete("/api/products/:id", authRequired, requireCap("products.manage"), async (req, res) => {
   try {
     const { rowCount } = await pool.query("DELETE FROM products WHERE id=$1", [req.params.id]);
     if (!rowCount) return res.status(404).json({ error: "product not found" });
@@ -728,7 +745,7 @@ app.post("/api/auth/login", async (req, res) => {
 app.get("/api/auth/me", authRequired, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      "SELECT id, email, name, role, created_at FROM users WHERE id=$1",
+      "SELECT id, email, name, role, department, created_at FROM users WHERE id=$1",
       [req.user.sub]
     );
     if (!rows.length) return res.status(404).json({ error: "user not found" });
@@ -759,7 +776,7 @@ app.put("/api/auth/me", authRequired, async (req, res) => {
 
     const { rows } = await pool.query(
       `UPDATE users SET name=COALESCE($2, name) WHERE id=$1
-       RETURNING id, email, name, role, created_at`,
+       RETURNING id, email, name, role, department, created_at`,
       [req.user.sub, name]
     );
     if (!rows.length) return res.status(404).json({ error: "user not found" });
@@ -1213,7 +1230,7 @@ app.get("/api/returns", authRequired, async (req, res) => {
 });
 
 // ---- Admin views --------------------------------------------------------------
-app.get("/api/admin/orders", authRequired, managementRead, async (_req, res) => {
+app.get("/api/admin/orders", authRequired, requireCapRead("orders.manage"), async (_req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT o.id, o.total, o.status, o.payment_ref, o.carrier, o.tracking, o.ship_to, o.created_at,
@@ -1230,7 +1247,7 @@ app.get("/api/admin/orders", authRequired, managementRead, async (_req, res) => 
 // Move an order through its fulfilment lifecycle (and record carrier/tracking
 // when shipping). A status of "refunded" is how an admin issues a refund against
 // the mock gateway — there's no external call, the order is just marked refunded.
-app.put("/api/admin/orders/:id/status", authRequired, adminRequired, async (req, res) => {
+app.put("/api/admin/orders/:id/status", authRequired, requireCap("orders.manage"), async (req, res) => {
   try {
     const { status, carrier, tracking } = req.body || {};
     if (!ORDER_STATUSES.includes(status)) {
@@ -1263,7 +1280,7 @@ app.put("/api/admin/orders/:id/status", authRequired, adminRequired, async (req,
 // ---- Admin returns queue ------------------------------------------------------
 
 // Every return request with order + customer context, for the Returns tab.
-app.get("/api/admin/returns", authRequired, managementRead, async (_req, res) => {
+app.get("/api/admin/returns", authRequired, requireCapRead("returns.manage"), async (_req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT r.id, r.order_id, r.reason, r.status, r.created_at, r.updated_at,
@@ -1282,7 +1299,7 @@ app.get("/api/admin/returns", authRequired, managementRead, async (_req, res) =>
 
 // Move a return through its lifecycle. Marking it "refunded" also flips the
 // underlying order to "refunded" (the mock gateway issues no external call).
-app.put("/api/admin/returns/:id/status", authRequired, adminRequired, async (req, res) => {
+app.put("/api/admin/returns/:id/status", authRequired, requireCap("returns.manage"), async (req, res) => {
   const client = await pool.connect();
   try {
     const { status } = req.body || {};
@@ -1325,7 +1342,7 @@ app.put("/api/admin/returns/:id/status", authRequired, adminRequired, async (req
 // Dashboard stats for the admin home. Returns headline counters plus a few
 // breakdowns the dashboard charts render (revenue per day, stock health,
 // listings per category, top-selling products).
-app.get("/api/admin/stats", authRequired, managementRead, async (_req, res) => {
+app.get("/api/admin/stats", authRequired, requireCapRead("reports.view"), async (_req, res) => {
   try {
     const [
       { rows: p },
@@ -1388,7 +1405,7 @@ app.get("/api/admin/stats", authRequired, managementRead, async (_req, res) => {
 app.get("/api/admin/users", authRequired, managementRead, async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT u.id, u.email, u.name, u.role, u.active, u.created_at,
+      `SELECT u.id, u.email, u.name, u.role, u.department, u.active, u.created_at,
               COUNT(o.id)::int AS orders,
               COALESCE(SUM(o.total),0)::numeric(12,2) AS spent
          FROM users u LEFT JOIN orders o ON o.user_id = u.id
@@ -1404,7 +1421,7 @@ app.get("/api/admin/users", authRequired, managementRead, async (_req, res) => {
 // internal roles (admin, staffing_team, employee) can only be created here.
 app.post("/api/admin/users", authRequired, adminRequired, async (req, res) => {
   try {
-    const { email, password, name, role } = req.body || {};
+    const { email, password, name, role, department } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: "email and password are required" });
     if (String(password).length < 6) {
       return res.status(400).json({ error: "password must be at least 6 characters" });
@@ -1412,14 +1429,19 @@ app.post("/api/admin/users", authRequired, adminRequired, async (req, res) => {
     if (role && !ROLES.includes(role)) {
       return res.status(400).json({ error: `role must be one of: ${ROLES.join(", ")}` });
     }
+    // A department only applies to employees; ignore it for every other role.
+    const dept = (role || "customer") === "employee" ? department || null : null;
+    if (dept && !DEPARTMENTS.includes(dept)) {
+      return res.status(400).json({ error: `department must be one of: ${DEPARTMENTS.join(", ")}` });
+    }
     const hash = await bcrypt.hash(password, 10);
     let rows;
     try {
       ({ rows } = await pool.query(
-        `INSERT INTO users (email, password_hash, name, role)
-         VALUES ($1,$2,$3,$4)
-         RETURNING id, email, name, role, created_at`,
-        [String(email).toLowerCase(), hash, name || "", role || "customer"]
+        `INSERT INTO users (email, password_hash, name, role, department)
+         VALUES ($1,$2,$3,$4,$5)
+         RETURNING id, email, name, role, department, created_at`,
+        [String(email).toLowerCase(), hash, name || "", role || "customer", dept]
       ));
     } catch (e) {
       if (e.code === "23505") return res.status(409).json({ error: "email already registered" });
@@ -1451,12 +1473,43 @@ app.put("/api/admin/users/:id/role", authRequired, adminRequired, async (req, re
         return res.status(400).json({ error: "cannot demote the last admin" });
       }
     }
+    // Department is only meaningful for employees; clear it on any other role so
+    // a demoted/promoted account never keeps stale capabilities.
     const { rows } = await pool.query(
-      "UPDATE users SET role=$2 WHERE id=$1 RETURNING id, email, name, role, created_at",
+      `UPDATE users SET role=$2,
+              department = CASE WHEN $2 = 'employee' THEN department ELSE NULL END
+        WHERE id=$1 RETURNING id, email, name, role, department, created_at`,
       [id, role]
     );
     if (!rows.length) return res.status(404).json({ error: "user not found" });
     audit(req.user, "user.role", "user:" + rows[0].id, `${rows[0].email} → ${role}`);
+    res.json({ user: rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Assign (or clear) an employee's department. Only admins may do this. The
+// department is what grants an employee their operational capabilities, so this
+// is the lever that decides which dashboard areas they can use. Only valid on
+// accounts whose role is 'employee'.
+app.put("/api/admin/users/:id/department", authRequired, adminRequired, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const department = req.body?.department || null;
+    if (department && !DEPARTMENTS.includes(department)) {
+      return res.status(400).json({ error: `department must be one of: ${DEPARTMENTS.join(", ")}` });
+    }
+    const { rows: cur } = await pool.query("SELECT role FROM users WHERE id=$1", [id]);
+    if (!cur.length) return res.status(404).json({ error: "user not found" });
+    if (cur[0].role !== "employee") {
+      return res.status(400).json({ error: "only employee accounts have a department" });
+    }
+    const { rows } = await pool.query(
+      "UPDATE users SET department=$2 WHERE id=$1 RETURNING id, email, name, role, department, created_at",
+      [id, department]
+    );
+    audit(req.user, "user.department", "user:" + id, `${rows[0].email} → ${department || "none"}`);
     res.json({ user: rows[0] });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1593,7 +1646,7 @@ app.post("/api/coupons/validate", authRequired, async (req, res) => {
 });
 
 // Admin coupon management.
-app.get("/api/admin/coupons", authRequired, managementRead, async (_req, res) => {
+app.get("/api/admin/coupons", authRequired, requireCapRead("coupons.manage"), async (_req, res) => {
   try {
     const { rows } = await pool.query(
       "SELECT id, code, percent_off, active, expires_at, created_at FROM coupons ORDER BY id DESC"
@@ -1604,7 +1657,7 @@ app.get("/api/admin/coupons", authRequired, managementRead, async (_req, res) =>
   }
 });
 
-app.post("/api/admin/coupons", authRequired, adminRequired, async (req, res) => {
+app.post("/api/admin/coupons", authRequired, requireCap("coupons.manage"), async (req, res) => {
   try {
     const { code, percent_off, expires_at } = req.body || {};
     const pct = Number(percent_off);
@@ -1631,7 +1684,7 @@ app.post("/api/admin/coupons", authRequired, adminRequired, async (req, res) => 
 });
 
 // Toggle active / edit a coupon's discount or expiry.
-app.put("/api/admin/coupons/:id", authRequired, adminRequired, async (req, res) => {
+app.put("/api/admin/coupons/:id", authRequired, requireCap("coupons.manage"), async (req, res) => {
   try {
     const { percent_off, active, expires_at } = req.body || {};
     const pct =
@@ -1653,7 +1706,7 @@ app.put("/api/admin/coupons/:id", authRequired, adminRequired, async (req, res) 
   }
 });
 
-app.delete("/api/admin/coupons/:id", authRequired, adminRequired, async (req, res) => {
+app.delete("/api/admin/coupons/:id", authRequired, requireCap("coupons.manage"), async (req, res) => {
   try {
     const { rowCount } = await pool.query("DELETE FROM coupons WHERE id=$1", [req.params.id]);
     if (!rowCount) return res.status(404).json({ error: "coupon not found" });
@@ -1704,7 +1757,7 @@ app.put("/api/admin/settings", authRequired, adminRequired, async (req, res) => 
 // ---------------------------------------------------------------------------
 
 // Every review (approved or not) with product + author context, for moderation.
-app.get("/api/admin/reviews", authRequired, managementRead, async (_req, res) => {
+app.get("/api/admin/reviews", authRequired, requireCapRead("reviews.manage"), async (_req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT r.id, r.product_id, r.rating, r.comment, r.approved, r.created_at,
@@ -1721,7 +1774,7 @@ app.get("/api/admin/reviews", authRequired, managementRead, async (_req, res) =>
 });
 
 // Approve (or un-approve) a review so it shows on the storefront.
-app.put("/api/admin/reviews/:id/approve", authRequired, adminRequired, async (req, res) => {
+app.put("/api/admin/reviews/:id/approve", authRequired, requireCap("reviews.manage"), async (req, res) => {
   try {
     const approved = req.body?.approved !== false; // defaults to true
     const { rows } = await pool.query(
@@ -1736,7 +1789,7 @@ app.put("/api/admin/reviews/:id/approve", authRequired, adminRequired, async (re
   }
 });
 
-app.delete("/api/admin/reviews/:id", authRequired, adminRequired, async (req, res) => {
+app.delete("/api/admin/reviews/:id", authRequired, requireCap("reviews.manage"), async (req, res) => {
   try {
     const { rowCount } = await pool.query("DELETE FROM reviews WHERE id=$1", [req.params.id]);
     if (!rowCount) return res.status(404).json({ error: "review not found" });
@@ -1750,8 +1803,16 @@ app.delete("/api/admin/reviews/:id", authRequired, adminRequired, async (req, re
 // ---------------------------------------------------------------------------
 // Customer support — tickets + threaded messages
 // ---------------------------------------------------------------------------
-const isManagement = (req) => ["admin", "staffing_team"].includes(req.user?.role);
-const isStaffReply = (req) => req.user?.role === "admin"; // admins reply as "staff"
+// Can view any ticket (the support queue): management roles, plus support-
+// department employees.
+const isManagement = (req) =>
+  ["admin", "staffing_team"].includes(req.user?.role) ||
+  (req.user?.role === "employee" && hasCap(req.user.department, "support.manage"));
+// Can write a "staff" reply: admins and support-department employees. (staffing_team
+// is read-only and only sees the queue.)
+const isStaffReply = (req) =>
+  req.user?.role === "admin" ||
+  (req.user?.role === "employee" && hasCap(req.user.department, "support.manage"));
 
 // Open a ticket with an initial message.
 app.post("/api/support", authRequired, async (req, res) => {
@@ -1881,7 +1942,7 @@ app.post("/api/support/:id/messages", authRequired, async (req, res) => {
 });
 
 // ---- Admin support queue ------------------------------------------------------
-app.get("/api/admin/support", authRequired, managementRead, async (_req, res) => {
+app.get("/api/admin/support", authRequired, requireCapRead("support.manage"), async (_req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT t.id, t.subject, t.status, t.created_at, t.updated_at,
@@ -1898,7 +1959,7 @@ app.get("/api/admin/support", authRequired, managementRead, async (_req, res) =>
   }
 });
 
-app.put("/api/admin/support/:id/status", authRequired, adminRequired, async (req, res) => {
+app.put("/api/admin/support/:id/status", authRequired, requireCap("support.manage"), async (req, res) => {
   try {
     const { status } = req.body || {};
     if (!TICKET_STATUSES.includes(status)) {

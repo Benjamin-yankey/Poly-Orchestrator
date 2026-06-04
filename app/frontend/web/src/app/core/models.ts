@@ -71,11 +71,73 @@ export const ROLE_INFO: RoleInfo[] = [
   },
 ];
 
+// Employee departments — the second RBAC axis. Only meaningful when role ===
+// 'employee'. Must match DEPARTMENTS in the products API (app/products/capabilities.js).
+export type Department =
+  | 'support'
+  | 'warehouse'
+  | 'marketing'
+  | 'order_processing'
+  | 'content'
+  | 'logistics';
+
+// Operational capabilities an employee can hold. Derived from their department,
+// never stored per-user. Must match CAPABILITIES in app/products/capabilities.js.
+export type Capability =
+  | 'orders.manage'
+  | 'returns.manage'
+  | 'support.manage'
+  | 'products.manage'
+  | 'coupons.manage'
+  | 'reviews.manage'
+  | 'reports.view';
+
+// Department -> capabilities. MIRROR of DEPARTMENT_CAPS in app/products/capabilities.js
+// (the backend copy is the real enforcement; this copy only gates the UI). Keep
+// the two in sync.
+export const DEPARTMENT_CAPS: Record<Department, Capability[]> = {
+  support: ['support.manage', 'returns.manage', 'orders.manage', 'reports.view'],
+  warehouse: ['products.manage', 'orders.manage', 'reports.view'],
+  marketing: ['coupons.manage', 'reviews.manage', 'reports.view'],
+  order_processing: ['orders.manage', 'returns.manage', 'reports.view'],
+  content: ['products.manage', 'reviews.manage', 'reports.view'],
+  logistics: ['orders.manage', 'reports.view'],
+};
+
+// Display catalog for the department <select> (admin Users tab) and the employee
+// dashboard header.
+export interface DepartmentInfo {
+  key: Department;
+  label: string;
+  description: string;
+}
+
+export const DEPARTMENT_INFO: DepartmentInfo[] = [
+  { key: 'support', label: 'Customer Support', description: 'Tickets, returns and order help.' },
+  { key: 'warehouse', label: 'Inventory / Warehouse', description: 'Stock levels and fulfilment.' },
+  { key: 'marketing', label: 'Sales & Marketing', description: 'Promotions, coupons and reviews.' },
+  { key: 'order_processing', label: 'Order Processing', description: 'Order review, status and returns.' },
+  { key: 'content', label: 'Content Management', description: 'Product info, photos and reviews.' },
+  { key: 'logistics', label: 'Delivery / Logistics', description: 'Shipping and delivery tracking.' },
+];
+
+export function departmentLabel(d?: Department | null): string {
+  return DEPARTMENT_INFO.find((x) => x.key === d)?.label ?? '—';
+}
+
+// True if a department holds a capability. Admins bypass this (handled in
+// AuthService.hasCap); use this helper for raw department checks.
+export function departmentHasCap(d: Department | null | undefined, cap: Capability): boolean {
+  return !!d && (DEPARTMENT_CAPS[d] ?? []).includes(cap);
+}
+
 export interface User {
   id: number;
   email: string;
   name: string;
   role: Role;
+  // Only set for internal employees; drives the employee dashboard's access.
+  department?: Department | null;
   created_at?: string;
 }
 
@@ -240,6 +302,7 @@ export interface AdminUser {
   email: string;
   name: string;
   role: Role;
+  department?: Department | null;
   active: boolean;
   created_at: string;
   orders: number;

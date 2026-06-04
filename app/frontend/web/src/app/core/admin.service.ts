@@ -9,6 +9,7 @@ import {
   AuditEntry,
   CartItem,
   Coupon,
+  Department,
   Listing,
   Order,
   OrderStatus,
@@ -54,12 +55,19 @@ export class AdminService {
     password: string;
     name: string;
     role: Role;
+    department?: Department | null;
   }): Observable<{ user: AdminUser }> {
     return this.http.post<{ user: AdminUser }>('/api/admin/users', payload);
   }
 
   setRole(id: number, role: Role): Observable<{ user: AdminUser }> {
     return this.http.put<{ user: AdminUser }>(`/api/admin/users/${id}/role`, { role });
+  }
+
+  // Assign (or clear, with null) an employee's department — the lever that grants
+  // their dashboard capabilities. Only valid on employee-role accounts.
+  setDepartment(id: number, department: Department | null): Observable<{ user: AdminUser }> {
+    return this.http.put<{ user: AdminUser }>(`/api/admin/users/${id}/department`, { department });
   }
 
   removeUser(id: number): Observable<{ ok: boolean }> {
