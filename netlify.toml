@@ -1,0 +1,81 @@
+# Netlify config for the ShopNow Angular SPA (frontend on Netlify, APIs on Render).
+#
+# This REPLACES app/frontend/server.js — Netlify can't run that Node proxy, so we
+# recreate its two jobs declaratively:
+#   1. Build & publish the Angular app.
+#   2. Proxy /api/* to the two Render backends by path prefix (same split as the
+#      Node proxy), so the browser keeps calling same-origin /api/* — no CORS needed.
+#
+# >>> EDIT the two hostnames below to YOUR actual Render service URLs <<<
+#     products -> https://shopnow-products.onrender.com
+#     cart     -> https://shopnow-cart.onrender.com
+
+[build]
+  base = "app/frontend/web"
+  command = "npm ci && npm run build"
+  publish = "dist/web/browser"        # Angular `application` builder output
+
+# ----------------------------------------------------------------------------
+# API proxy. Order matters: Netlify uses the FIRST matching rule, so the cart
+# prefixes must come before the /api/* catch-all that forwards to products.
+# Each cart prefix needs a bare rule + a splat rule (splat doesn't match the
+# bare path). force=true makes the rewrite win even if a file/path collides.
+# ----------------------------------------------------------------------------
+
+# ---- Cart service (carts, visits, wishlist, saved) ----
+[[redirects]]
+  from = "/api/cart"
+  to = "https://shopnow-cart.onrender.com/api/cart"
+  status = 200
+  force = true
+[[redirects]]
+  from = "/api/cart/*"
+  to = "https://shopnow-cart.onrender.com/api/cart/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/visits"
+  to = "https://shopnow-cart.onrender.com/api/visits"
+  status = 200
+  force = true
+[[redirects]]
+  from = "/api/visits/*"
+  to = "https://shopnow-cart.onrender.com/api/visits/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/wishlist"
+  to = "https://shopnow-cart.onrender.com/api/wishlist"
+  status = 200
+  force = true
+[[redirects]]
+  from = "/api/wishlist/*"
+  to = "https://shopnow-cart.onrender.com/api/wishlist/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/saved"
+  to = "https://shopnow-cart.onrender.com/api/saved"
+  status = 200
+  force = true
+[[redirects]]
+  from = "/api/saved/*"
+  to = "https://shopnow-cart.onrender.com/api/saved/:splat"
+  status = 200
+  force = true
+
+# ---- Everything else under /api -> Products / core API ----
+[[redirects]]
+  from = "/api/*"
+  to = "https://shopnow-products.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# ---- SPA fallback: let the Angular router handle deep links / refresh ----
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
