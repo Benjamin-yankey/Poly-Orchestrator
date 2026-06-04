@@ -3,9 +3,10 @@
 // backend microservices, discovered independently via env vars (no hard-coded
 // IPs). Routing is by path prefix:
 //     /api/products*  /api/categories*  /api/listings*  /api/auth*  /api/orders*
-//     /api/admin*  /api/coupons*  /api/settings*
+//     /api/admin*  /api/coupons*  /api/settings*  /api/addresses*
+//     /api/payment-methods*  /api/returns*  /api/support*  /api/notifications*
 //        -> Products / core API  (PRODUCTS_URL)
-//     /api/cart*       /api/visits*
+//     /api/cart*  /api/visits*  /api/wishlist*  /api/saved*
 //        -> Cart service         (CART_URL)
 // Anything that isn't /api and isn't a static asset falls through to index.html
 // so the Angular client-side router can handle deep links / refreshes.
@@ -31,8 +32,8 @@ const SPA_DIR = fs.existsSync(path.join(__dirname, "public", "index.html"))
 app.get("/health", (_req, res) => res.json({ status: "ok", tier: "frontend" }));
 
 // Pick the downstream service based on the request path prefix.
-const PRODUCTS_PREFIXES = ["/api/products", "/api/categories", "/api/listings", "/api/auth", "/api/orders", "/api/admin", "/api/coupons", "/api/settings"];
-const CART_PREFIXES = ["/api/cart", "/api/visits"];
+const PRODUCTS_PREFIXES = ["/api/products", "/api/categories", "/api/listings", "/api/auth", "/api/orders", "/api/admin", "/api/coupons", "/api/settings", "/api/addresses", "/api/payment-methods", "/api/returns", "/api/support", "/api/notifications"];
+const CART_PREFIXES = ["/api/cart", "/api/visits", "/api/wishlist", "/api/saved"];
 
 function targetFor(reqPath) {
   if (PRODUCTS_PREFIXES.some((p) => reqPath.startsWith(p))) return PRODUCTS_URL;

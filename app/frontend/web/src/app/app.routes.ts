@@ -26,6 +26,11 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/cart.component').then((m) => m.CartComponent),
   },
   {
+    path: 'wishlist',
+    canActivate: [authGuard],
+    loadComponent: () => import('./pages/wishlist.component').then((m) => m.WishlistComponent),
+  },
+  {
     path: 'login',
     loadComponent: () => import('./pages/login.component').then((m) => m.LoginComponent),
   },
@@ -47,6 +52,28 @@ export const routes: Routes = [
     path: 'profile',
     canActivate: [authGuard],
     loadComponent: () => import('./pages/profile.component').then((m) => m.ProfileComponent),
+  },
+  {
+    path: 'support',
+    canActivate: [authGuard],
+    loadComponent: () => import('./pages/support.component').then((m) => m.SupportComponent),
+  },
+  {
+    path: 'notifications',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./pages/notifications.component').then((m) => m.NotificationsComponent),
+  },
+  {
+    path: 'addresses',
+    canActivate: [authGuard],
+    loadComponent: () => import('./pages/addresses.component').then((m) => m.AddressesComponent),
+  },
+  {
+    path: 'payment-methods',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./pages/payment-methods.component').then((m) => m.PaymentMethodsComponent),
   },
   {
     path: 'admin',

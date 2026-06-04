@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap } from 'rxjs';
-import { CartState, Product } from './models';
+import { CartState, Product, ShelfItem } from './models';
 
 const EMPTY: CartState = { servedBy: '', items: [], count: 0, subtotal: 0 };
 
@@ -30,6 +30,20 @@ export class CartService {
         name: p.name,
         price: p.price,
         icon: p.icon,
+        qty,
+      })
+      .pipe(tap((s) => this.state.set(s)));
+  }
+
+  // Add straight from a wishlist / saved-for-later line (which already carries a
+  // product snapshot) without needing to re-fetch the full Product.
+  addShelfItem(it: ShelfItem, qty = it.qty || 1): Observable<CartState> {
+    return this.http
+      .post<CartState>('/api/cart', {
+        productId: it.productId,
+        name: it.name,
+        price: it.price,
+        icon: it.icon,
         qty,
       })
       .pipe(tap((s) => this.state.set(s)));

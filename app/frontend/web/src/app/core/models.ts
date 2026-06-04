@@ -106,11 +106,56 @@ export interface CartState {
   subtotal: number;
 }
 
+// A wishlist / save-for-later line. Same shape as a cart line; qty is only
+// meaningful for save-for-later (wishlist entries omit it).
+export interface ShelfItem {
+  productId: number;
+  name: string;
+  price: number | string;
+  icon: string;
+  qty?: number;
+}
+
+export interface ShelfState {
+  servedBy: string;
+  items: ShelfItem[];
+  count: number;
+}
+
 export interface PaymentDetails {
   cardNumber: string;
   name: string;
   expiry: string;
   cvc: string;
+}
+
+// A saved shipping/billing address in the customer's address book.
+export interface Address {
+  id: number;
+  label: string;
+  full_name: string;
+  line1: string;
+  line2: string;
+  city: string;
+  region: string;
+  postal_code: string;
+  country: string;
+  phone: string;
+  is_default: boolean;
+  created_at?: string;
+}
+
+// A card on file. Only the brand, last four digits and expiry are stored —
+// never the full number.
+export interface PaymentMethod {
+  id: number;
+  brand: string;
+  last4: string;
+  exp_month: number | null;
+  exp_year: number | null;
+  holder: string;
+  is_default: boolean;
+  created_at?: string;
 }
 
 export interface Order {
@@ -120,6 +165,8 @@ export interface Order {
   payment_ref: string;
   carrier?: string;
   tracking?: string;
+  ship_to?: string;
+  received_at?: string | null;
   created_at: string;
   customer_email?: string;
   customer_name?: string;
@@ -147,6 +194,28 @@ export const ORDER_STATUSES: OrderStatus[] = [
 export interface OrderDetail {
   order: Order;
   items: CartItem[];
+}
+
+// Return-request lifecycle — must match RETURN_STATUSES in the products API.
+export type ReturnStatus = 'requested' | 'approved' | 'rejected' | 'refunded';
+export const RETURN_STATUSES: ReturnStatus[] = ['requested', 'approved', 'rejected', 'refunded'];
+
+// A customer's return request (their own view).
+export interface ReturnRequest {
+  id: number;
+  order_id: number;
+  reason: string;
+  status: ReturnStatus;
+  created_at: string;
+  updated_at: string;
+  order_total?: number | string;
+}
+
+// A return as seen in the admin queue (with order + customer context).
+export interface AdminReturn extends ReturnRequest {
+  order_status: string;
+  customer_name: string;
+  customer_email: string;
 }
 
 export interface AdminStats {
@@ -192,6 +261,46 @@ export interface AdminReview extends Review {
   product_name: string;
   author_email: string;
   approved: boolean;
+}
+
+// Support-ticket lifecycle — must match TICKET_STATUSES in the products API.
+export type TicketStatus = 'open' | 'pending' | 'resolved' | 'closed';
+export const TICKET_STATUSES: TicketStatus[] = ['open', 'pending', 'resolved', 'closed'];
+
+// A support ticket as seen in the customer's list.
+export interface SupportTicket {
+  id: number;
+  subject: string;
+  status: TicketStatus;
+  created_at: string;
+  updated_at: string;
+  messages?: number;
+}
+
+// One message in a ticket thread. author_role is 'customer' or 'staff'.
+export interface SupportMessage {
+  id: number;
+  author_role: 'customer' | 'staff';
+  body: string;
+  created_at: string;
+  author?: string;
+}
+
+// A ticket as seen in the admin support queue (with customer context).
+export interface AdminTicket extends SupportTicket {
+  customer_name: string;
+  customer_email: string;
+}
+
+// An in-app notification.
+export interface AppNotification {
+  id: number;
+  kind: string;
+  title: string;
+  body: string;
+  link: string;
+  read: boolean;
+  created_at: string;
 }
 
 // A marketing promo code applied at checkout for a percentage off the order.

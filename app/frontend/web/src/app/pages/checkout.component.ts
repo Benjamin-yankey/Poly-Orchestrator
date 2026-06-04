@@ -4,8 +4,9 @@ import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { CartService } from '../core/cart.service';
 import { OrderService } from '../core/order.service';
+import { AccountService } from '../core/account.service';
 import { IconComponent } from '../core/icon.component';
-import { Coupon, Order, PaymentDetails } from '../core/models';
+import { Address, Coupon, Order, PaymentDetails, PaymentMethod } from '../core/models';
 
 @Component({
   selector: 'app-checkout',
@@ -31,28 +32,66 @@ import { Coupon, Order, PaymentDetails } from '../core/models';
         <div class="empty"><div class="big"><app-icon name="cart" [size]="56" /></div><p>Your cart is empty.</p><a class="btn" routerLink="/">Shop now</a></div>
       } @else {
         <div class="layout-2">
-          <div class="card" style="padding:26px">
-            <h3 style="margin-top:0">Payment details</h3>
-            <div class="alert info" style="display:flex;align-items:flex-start;gap:8px">
-              <app-icon name="card" [size]="18" />
-              <span><strong>Mock gateway.</strong> Use any card number — e.g. <code>4242 4242 4242 4242</code>.
-              Any number <em>ending in 0000</em> is declined so you can test failures.</span>
+          <div>
+            <!-- Shipping address -->
+            <div class="card" style="padding:26px;margin-bottom:18px">
+              <div class="row spread"><h3 style="margin-top:0">Shipping address</h3><a class="btn ghost sm" routerLink="/addresses">Manage</a></div>
+              @if (addresses().length === 0) {
+                <p class="muted">No saved addresses. <a routerLink="/addresses">Add one</a> for faster checkout — or just continue (we'll skip shipping for this mock order).</p>
+              } @else {
+                @for (a of addresses(); track a.id) {
+                  <label class="pick">
+                    <input type="radio" name="addr" [value]="a.id" [(ngModel)]="addressId" />
+                    <span>
+                      <strong>{{ a.label }}</strong> @if (a.is_default) { <span class="muted">· default</span> }<br />
+                      <span class="muted">{{ a.full_name }}, {{ a.line1 }}, {{ a.city }} {{ a.postal_code }}</span>
+                    </span>
+                  </label>
+                }
+              }
             </div>
-            @if (error()) { <div class="alert error">{{ error() }}</div> }
 
-            <form (ngSubmit)="pay()">
-              <label>Name on card</label>
-              <input name="name" [(ngModel)]="payment.name" required />
-              <label>Card number</label>
-              <input name="cardNumber" [(ngModel)]="payment.cardNumber" placeholder="4242 4242 4242 4242" required />
-              <div class="field-row">
-                <div><label>Expiry</label><input name="expiry" [(ngModel)]="payment.expiry" placeholder="MM/YY" required /></div>
-                <div><label>CVC</label><input name="cvc" [(ngModel)]="payment.cvc" placeholder="123" required /></div>
+            <!-- Payment -->
+            <div class="card" style="padding:26px">
+              <h3 style="margin-top:0">Payment</h3>
+              <div class="alert info" style="display:flex;align-items:flex-start;gap:8px">
+                <app-icon name="card" [size]="18" />
+                <span><strong>Mock gateway.</strong> Use any card number — e.g. <code>4242 4242 4242 4242</code>.
+                Any number <em>ending in 0000</em> is declined so you can test failures.</span>
               </div>
-              <button class="btn block success" style="margin-top:20px" [disabled]="loading()">
-                {{ loading() ? 'Processing…' : 'Pay $' + total().toFixed(2) }}
-              </button>
-            </form>
+              @if (error()) { <div class="alert error">{{ error() }}</div> }
+
+              @if (methods().length > 0) {
+                <label>Pay with</label>
+                <select [(ngModel)]="paymentMethodId" name="pm">
+                  <option [ngValue]="null">A new card</option>
+                  @for (m of methods(); track m.id) {
+                    <option [ngValue]="m.id">{{ m.brand }} •••• {{ m.last4 }}{{ m.is_default ? ' (default)' : '' }}</option>
+                  }
+                </select>
+              }
+
+              @if (!paymentMethodId) {
+                <form (ngSubmit)="pay()">
+                  <label>Name on card</label>
+                  <input name="name" [(ngModel)]="payment.name" required />
+                  <label>Card number</label>
+                  <input name="cardNumber" [(ngModel)]="payment.cardNumber" placeholder="4242 4242 4242 4242" required />
+                  <div class="field-row">
+                    <div><label>Expiry</label><input name="expiry" [(ngModel)]="payment.expiry" placeholder="MM/YY" required /></div>
+                    <div><label>CVC</label><input name="cvc" [(ngModel)]="payment.cvc" placeholder="123" required /></div>
+                  </div>
+                  <button class="btn block success" style="margin-top:20px" [disabled]="loading()">
+                    {{ loading() ? 'Processing…' : 'Pay $' + total().toFixed(2) }}
+                  </button>
+                </form>
+              } @else {
+                <p class="muted" style="margin-top:14px">Charging your saved {{ savedLabel() }} card.</p>
+                <button class="btn block success" (click)="pay()" [disabled]="loading()">
+                  {{ loading() ? 'Processing…' : 'Pay $' + total().toFixed(2) }}
+                </button>
+              }
+            </div>
           </div>
 
           <div class="card summary">
@@ -84,6 +123,12 @@ import { Coupon, Order, PaymentDetails } from '../core/models';
       }
     </div>
   `,
+  styles: [
+    `.pick { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--border);
+       border-radius:10px; margin-bottom:10px; cursor:pointer; }
+     .pick input { width:auto; margin-top:3px; }
+     .pick:has(input:checked) { border-color:var(--brand); background:#eef2ff; }`,
+  ],
 })
 export class CheckoutComponent implements OnInit {
   payment: PaymentDetails = { cardNumber: '', name: '', expiry: '', cvc: '' };
@@ -96,10 +141,35 @@ export class CheckoutComponent implements OnInit {
   coupon = signal<Coupon | null>(null);
   couponMsg = signal('');
 
-  constructor(public cart: CartService, private orders: OrderService, private router: Router) {}
+  // Saved address + card selection (pre-filled from the account on load).
+  addresses = signal<Address[]>([]);
+  methods = signal<PaymentMethod[]>([]);
+  addressId: number | null = null;
+  paymentMethodId: number | null = null;
+
+  constructor(
+    public cart: CartService,
+    private orders: OrderService,
+    private account: AccountService,
+    private router: Router
+  ) {}
 
   ngOnInit(): void {
     this.cart.refresh();
+    this.account.addresses().subscribe((r) => {
+      this.addresses.set(r.addresses);
+      this.addressId = r.addresses.find((a) => a.is_default)?.id ?? null;
+    });
+    this.account.methods().subscribe((r) => {
+      this.methods.set(r.methods);
+      this.paymentMethodId = r.methods.find((m) => m.is_default)?.id ?? null;
+    });
+  }
+
+  // Label for the currently-selected saved card (for the "Charging your…" line).
+  savedLabel(): string {
+    const m = this.methods().find((x) => x.id === this.paymentMethodId);
+    return m ? `${m.brand} •••• ${m.last4}` : '';
   }
 
   // The discount applied to the current subtotal, and the resulting total.
@@ -138,7 +208,13 @@ export class CheckoutComponent implements OnInit {
   pay(): void {
     this.error.set('');
     this.loading.set(true);
-    this.orders.place(this.cart.state().items, this.payment, this.coupon()?.code).subscribe({
+    this.orders
+      .place(this.cart.state().items, this.payment, {
+        couponCode: this.coupon()?.code,
+        addressId: this.addressId ?? undefined,
+        paymentMethodId: this.paymentMethodId ?? undefined,
+      })
+      .subscribe({
       next: (r) => {
         // Order persisted + paid -> empty the cart and show confirmation.
         this.cart.clear().subscribe();

@@ -41,10 +41,51 @@ const publicUser = (u) => ({
 // Validate the prefix so we never persist arbitrary strings as "images".
 const isDataImage = (s) => /^data:image\/(png|jpe?g|webp|gif);base64,/.test(s);
 
+// Best-effort card brand from the number, used only as a label for a saved card.
+function cardBrand(number) {
+  const n = String(number || "").replace(/\D/g, "");
+  if (/^4/.test(n)) return "Visa";
+  if (/^(5[1-5]|2[2-7])/.test(n)) return "Mastercard";
+  if (/^3[47]/.test(n)) return "Amex";
+  if (/^6/.test(n)) return "Discover";
+  return "Card";
+}
+
+// Parse "MM/YY" or "MM/YYYY" into { month, year } (nulls when unparseable).
+function parseExpiry(s) {
+  const m = /^(\d{1,2})\s*\/\s*(\d{2,4})$/.exec(String(s || "").trim());
+  if (!m) return { month: null, year: null };
+  const month = Number(m[1]);
+  let year = Number(m[2]);
+  if (year < 100) year += 2000;
+  return { month: month >= 1 && month <= 12 ? month : null, year };
+}
+
+// One-line snapshot of an address row, stored on the order it shipped to.
+function formatAddress(a) {
+  return [
+    a.full_name,
+    a.line1,
+    a.line2,
+    [a.city, a.region, a.postal_code].filter(Boolean).join(" "),
+    a.country,
+  ]
+    .map((s) => String(s || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
 // Order fulfilment lifecycle. "paid" is where every order starts (the mock
 // gateway charged successfully); admins move it forward, or to a terminal
 // cancelled/refunded state.
 const ORDER_STATUSES = ["paid", "processing", "shipped", "delivered", "cancelled", "refunded"];
+
+// Return-request lifecycle. A customer opens one ("requested"); an admin approves
+// or rejects it, then marks it "refunded" once the money is returned (which also
+// flips the underlying order to "refunded").
+const RETURN_STATUSES = ["requested", "approved", "rejected", "refunded"];
+// Statuses an order must be in before a return can be requested against it.
+const RETURNABLE_STATUSES = ["shipped", "delivered"];
 
 // Append an entry to the audit trail. Best-effort: a logging failure must never
 // break the action that triggered it, so we swallow errors (and log them to the
@@ -63,6 +104,39 @@ async function audit(actor, action, entity = "", detail = "") {
     console.error("audit log failed:", e.message);
   }
 }
+
+// Drop an in-app notification for a user. Best-effort, like audit() — a logging
+// failure must never break the action (order, return, reply) that triggered it.
+async function notify(userId, { kind = "info", title, body = "", link = "" }) {
+  try {
+    if (!userId || !title) return;
+    await pool.query(
+      `INSERT INTO notifications (user_id, kind, title, body, link)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [userId, kind, title, body, link]
+    );
+  } catch (e) {
+    console.error("notify failed:", e.message);
+  }
+}
+
+// Ping every management user (admin + staffing_team) about a support event,
+// skipping whoever triggered it. Best-effort, same contract as notify().
+async function notifyManagement(exceptUserId, payload) {
+  try {
+    const { rows } = await pool.query(
+      "SELECT id FROM users WHERE role IN ('admin','staffing_team')"
+    );
+    await Promise.all(
+      rows.filter((r) => r.id !== exceptUserId).map((r) => notify(r.id, payload))
+    );
+  } catch (e) {
+    console.error("notifyManagement failed:", e.message);
+  }
+}
+
+// Support-ticket lifecycle.
+const TICKET_STATUSES = ["open", "pending", "resolved", "closed"];
 
 // ---------------------------------------------------------------------------
 // Schema + seed (idempotent, retried while Postgres boots)
@@ -172,6 +246,82 @@ async function initDb() {
       approved   BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (product_id, user_id)
+    );
+    -- Saved shipping/billing addresses in the customer's address book. One may be
+    -- flagged the default (pre-selected at checkout).
+    CREATE TABLE IF NOT EXISTS addresses (
+      id          SERIAL PRIMARY KEY,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      label       TEXT NOT NULL DEFAULT 'Home',
+      full_name   TEXT NOT NULL DEFAULT '',
+      line1       TEXT NOT NULL,
+      line2       TEXT NOT NULL DEFAULT '',
+      city        TEXT NOT NULL DEFAULT '',
+      region      TEXT NOT NULL DEFAULT '',
+      postal_code TEXT NOT NULL DEFAULT '',
+      country     TEXT NOT NULL DEFAULT '',
+      phone       TEXT NOT NULL DEFAULT '',
+      is_default  BOOLEAN NOT NULL DEFAULT false,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- Saved payment methods. We NEVER store a full card number — only the brand,
+    -- the last four digits and the expiry, which is all the mock gateway needs to
+    -- show a "card on file". One may be flagged the default.
+    CREATE TABLE IF NOT EXISTS payment_methods (
+      id         SERIAL PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      brand      TEXT NOT NULL DEFAULT 'Card',
+      last4      TEXT NOT NULL,
+      exp_month  INTEGER,
+      exp_year   INTEGER,
+      holder     TEXT NOT NULL DEFAULT '',
+      is_default BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- Orders remember where they shipped (a formatted snapshot of the chosen
+    -- address) so it stays correct even if the address book later changes.
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS ship_to TEXT NOT NULL DEFAULT '';
+    -- When the customer confirms they received an order, we stamp the time.
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ;
+    -- Customer-initiated return/refund requests against a delivered order. The
+    -- admin moves one through requested -> approved/rejected -> refunded.
+    CREATE TABLE IF NOT EXISTS returns (
+      id         SERIAL PRIMARY KEY,
+      order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reason     TEXT NOT NULL DEFAULT '',
+      status     TEXT NOT NULL DEFAULT 'requested',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- Customer support: a ticket is a conversation between a shopper and staff.
+    CREATE TABLE IF NOT EXISTS support_tickets (
+      id         SERIAL PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      subject    TEXT NOT NULL,
+      status     TEXT NOT NULL DEFAULT 'open',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS support_messages (
+      id          SERIAL PRIMARY KEY,
+      ticket_id   INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+      author_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      author_role TEXT NOT NULL DEFAULT 'customer',
+      body        TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- In-app notifications. Auto-created on order/return/support events so the
+    -- shopper sees a bell badge without any external email/SMS.
+    CREATE TABLE IF NOT EXISTS notifications (
+      id         SERIAL PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind       TEXT NOT NULL DEFAULT 'info',
+      title      TEXT NOT NULL,
+      body       TEXT NOT NULL DEFAULT '',
+      link       TEXT NOT NULL DEFAULT '',
+      read       BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );`;
 
   const seedProducts = `
@@ -620,6 +770,227 @@ app.put("/api/auth/me", authRequired, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Address book (saved shipping/billing addresses)
+// ---------------------------------------------------------------------------
+const ADDRESS_COLS =
+  "id, label, full_name, line1, line2, city, region, postal_code, country, phone, is_default, created_at";
+
+app.get("/api/addresses", authRequired, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ${ADDRESS_COLS} FROM addresses WHERE user_id=$1 ORDER BY is_default DESC, id DESC`,
+      [req.user.sub]
+    );
+    res.json({ addresses: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/addresses", authRequired, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const a = req.body || {};
+    if (!a.line1 || !String(a.line1).trim()) {
+      return res.status(400).json({ error: "address line 1 is required" });
+    }
+    const makeDefault = !!a.is_default;
+    await client.query("BEGIN");
+    // First address is the default by definition; otherwise honour the flag.
+    const { rows: cnt } = await client.query(
+      "SELECT COUNT(*)::int AS n FROM addresses WHERE user_id=$1",
+      [req.user.sub]
+    );
+    const isDefault = makeDefault || cnt[0].n === 0;
+    if (isDefault) {
+      await client.query("UPDATE addresses SET is_default=false WHERE user_id=$1", [req.user.sub]);
+    }
+    const { rows } = await client.query(
+      `INSERT INTO addresses (user_id, label, full_name, line1, line2, city, region, postal_code, country, phone, is_default)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${ADDRESS_COLS}`,
+      [
+        req.user.sub,
+        a.label || "Home",
+        a.full_name || "",
+        a.line1,
+        a.line2 || "",
+        a.city || "",
+        a.region || "",
+        a.postal_code || "",
+        a.country || "",
+        a.phone || "",
+        isDefault,
+      ]
+    );
+    await client.query("COMMIT");
+    res.status(201).json({ address: rows[0] });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.put("/api/addresses/:id", authRequired, async (req, res) => {
+  try {
+    const a = req.body || {};
+    const { rows } = await pool.query(
+      `UPDATE addresses SET
+         label=COALESCE($3,label), full_name=COALESCE($4,full_name), line1=COALESCE($5,line1),
+         line2=COALESCE($6,line2), city=COALESCE($7,city), region=COALESCE($8,region),
+         postal_code=COALESCE($9,postal_code), country=COALESCE($10,country), phone=COALESCE($11,phone)
+       WHERE id=$1 AND user_id=$2 RETURNING ${ADDRESS_COLS}`,
+      [
+        Number(req.params.id),
+        req.user.sub,
+        a.label ?? null,
+        a.full_name ?? null,
+        a.line1 ?? null,
+        a.line2 ?? null,
+        a.city ?? null,
+        a.region ?? null,
+        a.postal_code ?? null,
+        a.country ?? null,
+        a.phone ?? null,
+      ]
+    );
+    if (!rows.length) return res.status(404).json({ error: "address not found" });
+    res.json({ address: rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Make an address the default (unsets any previous default for this user).
+app.put("/api/addresses/:id/default", authRequired, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    await client.query("BEGIN");
+    const { rowCount } = await client.query(
+      "SELECT 1 FROM addresses WHERE id=$1 AND user_id=$2",
+      [id, req.user.sub]
+    );
+    if (!rowCount) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "address not found" });
+    }
+    await client.query("UPDATE addresses SET is_default=false WHERE user_id=$1", [req.user.sub]);
+    await client.query("UPDATE addresses SET is_default=true WHERE id=$1", [id]);
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/addresses/:id", authRequired, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query("DELETE FROM addresses WHERE id=$1 AND user_id=$2", [
+      Number(req.params.id),
+      req.user.sub,
+    ]);
+    if (!rowCount) return res.status(404).json({ error: "address not found" });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Saved payment methods (only brand + last4 + expiry are stored)
+// ---------------------------------------------------------------------------
+const PM_COLS = "id, brand, last4, exp_month, exp_year, holder, is_default, created_at";
+
+app.get("/api/payment-methods", authRequired, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ${PM_COLS} FROM payment_methods WHERE user_id=$1 ORDER BY is_default DESC, id DESC`,
+      [req.user.sub]
+    );
+    res.json({ methods: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Save a card on file. We accept the full number to validate it, then KEEP ONLY
+// the last four digits + brand + expiry — the PAN is never persisted.
+app.post("/api/payment-methods", authRequired, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { cardNumber, holder, expiry, is_default } = req.body || {};
+    const digits = String(cardNumber || "").replace(/\D/g, "");
+    if (digits.length < 12) return res.status(400).json({ error: "enter a valid card number" });
+    const { month, year } = parseExpiry(expiry);
+    const makeDefault = !!is_default;
+    await client.query("BEGIN");
+    const { rows: cnt } = await client.query(
+      "SELECT COUNT(*)::int AS n FROM payment_methods WHERE user_id=$1",
+      [req.user.sub]
+    );
+    const isDefault = makeDefault || cnt[0].n === 0;
+    if (isDefault) {
+      await client.query("UPDATE payment_methods SET is_default=false WHERE user_id=$1", [req.user.sub]);
+    }
+    const { rows } = await client.query(
+      `INSERT INTO payment_methods (user_id, brand, last4, exp_month, exp_year, holder, is_default)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING ${PM_COLS}`,
+      [req.user.sub, cardBrand(digits), digits.slice(-4), month, year, holder || "", isDefault]
+    );
+    await client.query("COMMIT");
+    res.status(201).json({ method: rows[0] });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.put("/api/payment-methods/:id/default", authRequired, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    await client.query("BEGIN");
+    const { rowCount } = await client.query(
+      "SELECT 1 FROM payment_methods WHERE id=$1 AND user_id=$2",
+      [id, req.user.sub]
+    );
+    if (!rowCount) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "payment method not found" });
+    }
+    await client.query("UPDATE payment_methods SET is_default=false WHERE user_id=$1", [req.user.sub]);
+    await client.query("UPDATE payment_methods SET is_default=true WHERE id=$1", [id]);
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/payment-methods/:id", authRequired, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      "DELETE FROM payment_methods WHERE id=$1 AND user_id=$2",
+      [Number(req.params.id), req.user.sub]
+    );
+    if (!rowCount) return res.status(404).json({ error: "payment method not found" });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Orders + MOCK payment gateway
 // ---------------------------------------------------------------------------
 
@@ -650,7 +1021,7 @@ function mockCharge(payment, amount) {
 app.post("/api/orders", authRequired, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { items, payment, couponCode } = req.body || {};
+    const { items, payment, couponCode, addressId, paymentMethodId } = req.body || {};
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "cart is empty" });
     }
@@ -664,14 +1035,39 @@ app.post("/api/orders", authRequired, async (req, res) => {
       total = total * (1 - coupon.percent_off / 100);
     }
 
-    const charge = mockCharge(payment, total);
+    // Resolve the shipping address from the caller's address book (when chosen),
+    // snapshotting it onto the order so it stays correct if the book changes.
+    let shipTo = "";
+    if (addressId) {
+      const { rows: addr } = await pool.query(
+        "SELECT * FROM addresses WHERE id=$1 AND user_id=$2",
+        [Number(addressId), req.user.sub]
+      );
+      if (!addr.length) return res.status(400).json({ error: "shipping address not found" });
+      shipTo = formatAddress(addr[0]);
+    }
+
+    // Charge via a saved card on file (must belong to the caller) or the typed
+    // card. A saved card is always approved by the mock gateway; typed cards still
+    // run through mockCharge (so the "ends in 0000 declines" test still works).
+    let charge;
+    if (paymentMethodId) {
+      const { rows: pm } = await pool.query(
+        "SELECT last4 FROM payment_methods WHERE id=$1 AND user_id=$2",
+        [Number(paymentMethodId), req.user.sub]
+      );
+      if (!pm.length) return res.status(400).json({ error: "payment method not found" });
+      charge = { ok: true, ref: "MOCK-SAVED-" + Date.now().toString(36).toUpperCase() + "-" + pm[0].last4 };
+    } else {
+      charge = mockCharge(payment, total);
+    }
     if (!charge.ok) return res.status(402).json({ error: `payment failed: ${charge.reason}` });
 
     await client.query("BEGIN");
     const { rows: orderRows } = await client.query(
-      `INSERT INTO orders (user_id, total, status, payment_ref)
-       VALUES ($1,$2,'paid',$3) RETURNING id, total, status, payment_ref, created_at`,
-      [req.user.sub, total.toFixed(2), charge.ref]
+      `INSERT INTO orders (user_id, total, status, payment_ref, ship_to)
+       VALUES ($1,$2,'paid',$3,$4) RETURNING id, total, status, payment_ref, ship_to, created_at`,
+      [req.user.sub, total.toFixed(2), charge.ref, shipTo]
     );
     const order = orderRows[0];
     for (const it of items) {
@@ -690,6 +1086,12 @@ app.post("/api/orders", authRequired, async (req, res) => {
       }
     }
     await client.query("COMMIT");
+    notify(req.user.sub, {
+      kind: "order",
+      title: `Order #${order.id} confirmed`,
+      body: `We received your payment of $${Number(order.total).toFixed(2)}. Thanks for shopping!`,
+      link: "/orders",
+    });
     res.status(201).json({ order: { ...order, items } });
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
@@ -703,7 +1105,7 @@ app.post("/api/orders", authRequired, async (req, res) => {
 app.get("/api/orders", authRequired, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, total, status, payment_ref, created_at
+      `SELECT id, total, status, payment_ref, carrier, tracking, ship_to, received_at, created_at
          FROM orders WHERE user_id=$1 ORDER BY id DESC`,
       [req.user.sub]
     );
@@ -732,11 +1134,89 @@ app.get("/api/orders/:id", authRequired, async (req, res) => {
   }
 });
 
+// Customer confirms they received an order (only their own, once it has shipped).
+app.put("/api/orders/:id/confirm-receipt", authRequired, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT user_id, status FROM orders WHERE id=$1", [
+      Number(req.params.id),
+    ]);
+    const order = rows[0];
+    if (!order) return res.status(404).json({ error: "order not found" });
+    if (order.user_id !== req.user.sub) return res.status(403).json({ error: "forbidden" });
+    if (!["shipped", "delivered"].includes(order.status)) {
+      return res.status(400).json({ error: "order has not shipped yet" });
+    }
+    // Mark received, and advance to "delivered" if it was still in transit.
+    const { rows: upd } = await pool.query(
+      `UPDATE orders SET received_at = now(),
+         status = CASE WHEN status = 'shipped' THEN 'delivered' ELSE status END
+       WHERE id=$1 RETURNING id, total, status, payment_ref, carrier, tracking, ship_to, received_at, created_at`,
+      [Number(req.params.id)]
+    );
+    audit(req.user, "order.receipt", "order:" + req.params.id, "");
+    res.json({ order: upd[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Returns & refunds (customer-initiated)
+// ---------------------------------------------------------------------------
+
+// Open a return request against one of the caller's own orders.
+app.post("/api/orders/:id/return", authRequired, async (req, res) => {
+  try {
+    const orderId = Number(req.params.id);
+    const { reason } = req.body || {};
+    const { rows } = await pool.query("SELECT user_id, status FROM orders WHERE id=$1", [orderId]);
+    const order = rows[0];
+    if (!order) return res.status(404).json({ error: "order not found" });
+    if (order.user_id !== req.user.sub) return res.status(403).json({ error: "forbidden" });
+    if (!RETURNABLE_STATUSES.includes(order.status)) {
+      return res.status(400).json({ error: "only shipped or delivered orders can be returned" });
+    }
+    // One open request per order — block duplicates while one is in flight.
+    const { rows: existing } = await pool.query(
+      "SELECT id FROM returns WHERE order_id=$1 AND status IN ('requested','approved')",
+      [orderId]
+    );
+    if (existing.length) {
+      return res.status(409).json({ error: "a return is already in progress for this order" });
+    }
+    const { rows: ret } = await pool.query(
+      `INSERT INTO returns (order_id, user_id, reason, status)
+       VALUES ($1,$2,$3,'requested') RETURNING id, order_id, reason, status, created_at, updated_at`,
+      [orderId, req.user.sub, String(reason || "")]
+    );
+    audit(req.user, "return.request", "order:" + orderId, ret[0].reason);
+    res.status(201).json({ return: ret[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// The caller's own return requests (with a little order context).
+app.get("/api/returns", authRequired, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.id, r.order_id, r.reason, r.status, r.created_at, r.updated_at,
+              o.total AS order_total
+         FROM returns r JOIN orders o ON o.id = r.order_id
+        WHERE r.user_id = $1 ORDER BY r.id DESC`,
+      [req.user.sub]
+    );
+    res.json({ returns: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---- Admin views --------------------------------------------------------------
 app.get("/api/admin/orders", authRequired, managementRead, async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT o.id, o.total, o.status, o.payment_ref, o.carrier, o.tracking, o.created_at,
+      `SELECT o.id, o.total, o.status, o.payment_ref, o.carrier, o.tracking, o.ship_to, o.created_at,
               u.email AS customer_email, u.name AS customer_name
          FROM orders o JOIN users u ON u.id = o.user_id
        ORDER BY o.id DESC`
@@ -762,14 +1242,83 @@ app.put("/api/admin/orders/:id/status", authRequired, adminRequired, async (req,
          carrier  = COALESCE($3, carrier),
          tracking = COALESCE($4, tracking)
        WHERE id = $1
-       RETURNING id, total, status, payment_ref, carrier, tracking, created_at`,
+       RETURNING id, user_id, total, status, payment_ref, carrier, tracking, ship_to, received_at, created_at`,
       [Number(req.params.id), status, carrier ?? null, tracking ?? null]
     );
     if (!rows.length) return res.status(404).json({ error: "order not found" });
     audit(req.user, "order.status", "order:" + rows[0].id, status);
+    const trackInfo = rows[0].tracking ? ` ${rows[0].carrier} tracking ${rows[0].tracking}.` : "";
+    notify(rows[0].user_id, {
+      kind: "order",
+      title: `Order #${rows[0].id} is now ${status}`,
+      body: `Your order status changed to "${status}".${trackInfo}`,
+      link: "/orders",
+    });
     res.json({ order: rows[0] });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Admin returns queue ------------------------------------------------------
+
+// Every return request with order + customer context, for the Returns tab.
+app.get("/api/admin/returns", authRequired, managementRead, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.id, r.order_id, r.reason, r.status, r.created_at, r.updated_at,
+              o.total AS order_total, o.status AS order_status,
+              u.name AS customer_name, u.email AS customer_email
+         FROM returns r
+         JOIN orders o ON o.id = r.order_id
+         JOIN users  u ON u.id = r.user_id
+        ORDER BY r.id DESC`
+    );
+    res.json({ returns: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Move a return through its lifecycle. Marking it "refunded" also flips the
+// underlying order to "refunded" (the mock gateway issues no external call).
+app.put("/api/admin/returns/:id/status", authRequired, adminRequired, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { status } = req.body || {};
+    if (!RETURN_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${RETURN_STATUSES.join(", ")}` });
+    }
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `UPDATE returns SET status=$2, updated_at=now() WHERE id=$1
+       RETURNING id, order_id, user_id, reason, status, created_at, updated_at`,
+      [Number(req.params.id), status]
+    );
+    if (!rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "return not found" });
+    }
+    if (status === "refunded") {
+      await client.query("UPDATE orders SET status='refunded' WHERE id=$1", [rows[0].order_id]);
+    }
+    await client.query("COMMIT");
+    audit(req.user, "return.status", "return:" + rows[0].id, status);
+    notify(rows[0].user_id, {
+      kind: "return",
+      title: `Return for order #${rows[0].order_id} ${status}`,
+      body:
+        status === "refunded"
+          ? "Your refund has been issued against the original payment."
+          : `Your return request was ${status}.`,
+      link: "/orders",
+    });
+    res.json({ return: rows[0] });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -1192,6 +1741,228 @@ app.delete("/api/admin/reviews/:id", authRequired, adminRequired, async (req, re
     const { rowCount } = await pool.query("DELETE FROM reviews WHERE id=$1", [req.params.id]);
     if (!rowCount) return res.status(404).json({ error: "review not found" });
     audit(req.user, "review.delete", "review:" + req.params.id, "");
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Customer support — tickets + threaded messages
+// ---------------------------------------------------------------------------
+const isManagement = (req) => ["admin", "staffing_team"].includes(req.user?.role);
+const isStaffReply = (req) => req.user?.role === "admin"; // admins reply as "staff"
+
+// Open a ticket with an initial message.
+app.post("/api/support", authRequired, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { subject, message } = req.body || {};
+    if (!subject || !String(subject).trim()) return res.status(400).json({ error: "subject is required" });
+    if (!message || !String(message).trim()) return res.status(400).json({ error: "message is required" });
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `INSERT INTO support_tickets (user_id, subject) VALUES ($1,$2)
+       RETURNING id, subject, status, created_at, updated_at`,
+      [req.user.sub, String(subject).trim()]
+    );
+    await client.query(
+      `INSERT INTO support_messages (ticket_id, author_id, author_role, body)
+       VALUES ($1,$2,'customer',$3)`,
+      [rows[0].id, req.user.sub, String(message).trim()]
+    );
+    await client.query("COMMIT");
+    // Alert the support team that a new ticket is waiting.
+    notifyManagement(req.user.sub, {
+      kind: "support",
+      title: `New support ticket: "${rows[0].subject}"`,
+      body: String(message).trim().slice(0, 140),
+      link: "/admin",
+    });
+    res.status(201).json({ ticket: rows[0] });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+// The caller's own tickets, with a reply count and last-activity time.
+app.get("/api/support", authRequired, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT t.id, t.subject, t.status, t.created_at, t.updated_at,
+              COUNT(m.id)::int AS messages
+         FROM support_tickets t
+         LEFT JOIN support_messages m ON m.ticket_id = t.id
+        WHERE t.user_id = $1
+        GROUP BY t.id ORDER BY t.updated_at DESC`,
+      [req.user.sub]
+    );
+    res.json({ tickets: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// A single ticket with its full message thread. The owner or any management
+// user may read it.
+app.get("/api/support/:id", authRequired, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM support_tickets WHERE id=$1", [
+      Number(req.params.id),
+    ]);
+    const ticket = rows[0];
+    if (!ticket) return res.status(404).json({ error: "ticket not found" });
+    if (ticket.user_id !== req.user.sub && !isManagement(req)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const { rows: messages } = await pool.query(
+      `SELECT m.id, m.author_role, m.body, m.created_at, u.name AS author
+         FROM support_messages m LEFT JOIN users u ON u.id = m.author_id
+        WHERE m.ticket_id = $1 ORDER BY m.id`,
+      [ticket.id]
+    );
+    res.json({ ticket, messages });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Post a reply. The owner replies as "customer"; an admin replies as "staff".
+// A customer reply on a resolved/closed ticket reopens it; a staff reply marks
+// it "pending" (awaiting the customer) and notifies them.
+app.post("/api/support/:id/messages", authRequired, async (req, res) => {
+  try {
+    const { body } = req.body || {};
+    if (!body || !String(body).trim()) return res.status(400).json({ error: "message body is required" });
+    const { rows } = await pool.query("SELECT * FROM support_tickets WHERE id=$1", [
+      Number(req.params.id),
+    ]);
+    const ticket = rows[0];
+    if (!ticket) return res.status(404).json({ error: "ticket not found" });
+    const owner = ticket.user_id === req.user.sub;
+    if (!owner && !isManagement(req)) return res.status(403).json({ error: "forbidden" });
+    // Only the owner or an admin can actually write; staffing_team is read-only.
+    if (!owner && !isStaffReply(req)) return res.status(403).json({ error: "read-only access" });
+
+    const role = owner ? "customer" : "staff";
+    const { rows: msg } = await pool.query(
+      `INSERT INTO support_messages (ticket_id, author_id, author_role, body)
+       VALUES ($1,$2,$3,$4) RETURNING id, author_role, body, created_at`,
+      [ticket.id, req.user.sub, role, String(body).trim()]
+    );
+    const newStatus = role === "staff" ? "pending" : "open";
+    await pool.query("UPDATE support_tickets SET status=$2, updated_at=now() WHERE id=$1", [
+      ticket.id,
+      newStatus,
+    ]);
+    // A staff reply pings the ticket owner; a customer reply pings the team.
+    if (role === "staff") {
+      notify(ticket.user_id, {
+        kind: "support",
+        title: `Support replied to "${ticket.subject}"`,
+        body: String(body).trim().slice(0, 140),
+        link: "/support",
+      });
+    } else {
+      notifyManagement(req.user.sub, {
+        kind: "support",
+        title: `Customer replied to "${ticket.subject}"`,
+        body: String(body).trim().slice(0, 140),
+        link: "/admin",
+      });
+    }
+    res.status(201).json({ message: msg[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Admin support queue ------------------------------------------------------
+app.get("/api/admin/support", authRequired, managementRead, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT t.id, t.subject, t.status, t.created_at, t.updated_at,
+              COUNT(m.id)::int AS messages,
+              u.name AS customer_name, u.email AS customer_email
+         FROM support_tickets t
+         JOIN users u ON u.id = t.user_id
+         LEFT JOIN support_messages m ON m.ticket_id = t.id
+        GROUP BY t.id, u.name, u.email ORDER BY t.updated_at DESC`
+    );
+    res.json({ tickets: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put("/api/admin/support/:id/status", authRequired, adminRequired, async (req, res) => {
+  try {
+    const { status } = req.body || {};
+    if (!TICKET_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${TICKET_STATUSES.join(", ")}` });
+    }
+    const { rows } = await pool.query(
+      `UPDATE support_tickets SET status=$2, updated_at=now() WHERE id=$1
+       RETURNING id, user_id, subject, status, created_at, updated_at`,
+      [Number(req.params.id), status]
+    );
+    if (!rows.length) return res.status(404).json({ error: "ticket not found" });
+    audit(req.user, "support.status", "ticket:" + rows[0].id, status);
+    notify(rows[0].user_id, {
+      kind: "support",
+      title: `Your ticket "${rows[0].subject}" is ${status}`,
+      body: `A support agent set your ticket to "${status}".`,
+      link: "/support",
+    });
+    res.json({ ticket: rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Notifications (in-app)
+// ---------------------------------------------------------------------------
+
+// The caller's notifications (newest first) plus the unread count for the badge.
+app.get("/api/notifications", authRequired, async (req, res) => {
+  try {
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const { rows } = await pool.query(
+      `SELECT id, kind, title, body, link, read, created_at
+         FROM notifications WHERE user_id=$1 ORDER BY id DESC LIMIT $2`,
+      [req.user.sub, limit]
+    );
+    const { rows: u } = await pool.query(
+      "SELECT COUNT(*)::int AS n FROM notifications WHERE user_id=$1 AND read=false",
+      [req.user.sub]
+    );
+    res.json({ notifications: rows, unread: u[0].n });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/notifications/:id/read", authRequired, async (req, res) => {
+  try {
+    await pool.query("UPDATE notifications SET read=true WHERE id=$1 AND user_id=$2", [
+      Number(req.params.id),
+      req.user.sub,
+    ]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/notifications/read-all", authRequired, async (req, res) => {
+  try {
+    await pool.query("UPDATE notifications SET read=true WHERE user_id=$1 AND read=false", [
+      req.user.sub,
+    ]);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

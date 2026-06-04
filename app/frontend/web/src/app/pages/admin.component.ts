@@ -3,12 +3,15 @@ import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ProductService } from '../core/product.service';
 import { AdminService } from '../core/admin.service';
+import { SupportService } from '../core/support.service';
 import { AuthService } from '../core/auth.service';
 import { IconComponent } from '../core/icon.component';
 import { SettingsService } from '../core/settings.service';
 import {
+  AdminReturn,
   AdminReview,
   AdminStats,
+  AdminTicket,
   AdminUser,
   AuditEntry,
   CartItem,
@@ -18,8 +21,12 @@ import {
   OrderStatus,
   ORDER_STATUSES,
   Product,
+  ReturnStatus,
   Role,
   ROLE_INFO,
+  SupportMessage,
+  TicketStatus,
+  TICKET_STATUSES,
 } from '../core/models';
 
 type Tab =
@@ -27,11 +34,13 @@ type Tab =
   | 'products'
   | 'inventory'
   | 'orders'
+  | 'returns'
   | 'payments'
   | 'users'
   | 'roles'
   | 'listings'
   | 'reviews'
+  | 'support'
   | 'coupons'
   | 'security'
   | 'settings';
@@ -64,12 +73,14 @@ type Tab =
         <button class="tab" [class.active]="tab() === 'products'" (click)="go('products')"><app-icon name="shop" [size]="16" /> Products</button>
         <button class="tab" [class.active]="tab() === 'inventory'" (click)="go('inventory')"><app-icon name="box" [size]="16" /> Inventory</button>
         <button class="tab" [class.active]="tab() === 'orders'" (click)="go('orders')"><app-icon name="orders" [size]="16" /> Orders</button>
+        <button class="tab" [class.active]="tab() === 'returns'" (click)="go('returns')"><app-icon name="return" [size]="16" /> Returns</button>
         <button class="tab" [class.active]="tab() === 'payments'" (click)="go('payments')"><app-icon name="card" [size]="16" /> Payments</button>
         <button class="tab" [class.active]="tab() === 'coupons'" (click)="go('coupons')"><app-icon name="tag" [size]="16" /> Coupons</button>
         <button class="tab" [class.active]="tab() === 'users'" (click)="go('users')"><app-icon name="user" [size]="16" /> Users</button>
         <button class="tab" [class.active]="tab() === 'roles'" (click)="go('roles')"><app-icon name="lock" [size]="16" /> Roles</button>
         <button class="tab" [class.active]="tab() === 'listings'" (click)="go('listings')"><app-icon name="marketplace" [size]="16" /> Listings</button>
         <button class="tab" [class.active]="tab() === 'reviews'" (click)="go('reviews')"><app-icon name="star" [size]="16" /> Reviews</button>
+        <button class="tab" [class.active]="tab() === 'support'" (click)="go('support')"><app-icon name="message" [size]="16" /> Support</button>
         <button class="tab" [class.active]="tab() === 'security'" (click)="go('security')"><app-icon name="shield" [size]="16" /> Security</button>
         <button class="tab" [class.active]="tab() === 'settings'" (click)="go('settings')"><app-icon name="settings" [size]="16" /> Settings</button>
       </div>
@@ -515,6 +526,94 @@ type Tab =
         </div>
       }
 
+      <!-- ============================ RETURNS ============================ -->
+      @if (tab() === 'returns') {
+        <p class="muted" style="margin-top:0">Customer return requests. Approve or reject them, then mark refunded once the money's back — which flips the order to refunded.</p>
+        <div class="card" style="padding:6px 20px">
+          <div class="table-scroll">
+          <table>
+            <thead><tr><th>Order</th><th>Customer</th><th>Reason</th><th>Requested</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              @for (r of returns(); track r.id) {
+                <tr>
+                  <td>#{{ r.order_id }}<br /><span class="muted" style="font-size:.8rem">\${{ (+(r.order_total || 0)).toFixed(2) }}</span></td>
+                  <td>{{ r.customer_name || '—' }}<br /><span class="muted" style="font-size:.8rem">{{ r.customer_email }}</span></td>
+                  <td style="max-width:260px">{{ r.reason || '—' }}</td>
+                  <td>{{ r.created_at | date: 'short' }}</td>
+                  <td><span class="tag" [ngClass]="returnTagClass(r.status)">{{ r.status }}</span></td>
+                  <td class="row">
+                    @if (canManage()) {
+                      @if (r.status === 'requested') {
+                        <button class="btn ghost sm" (click)="setReturn(r, 'approved')">Approve</button>
+                        <button class="btn ghost sm" style="color:var(--danger)" (click)="setReturn(r, 'rejected')">Reject</button>
+                      } @else if (r.status === 'approved') {
+                        <button class="btn ghost sm" (click)="setReturn(r, 'refunded')">Mark refunded</button>
+                      } @else { <span class="muted">—</span> }
+                    } @else { <span class="muted">—</span> }
+                  </td>
+                </tr>
+              } @empty { <tr><td colspan="6" class="muted center" style="padding:30px">No return requests.</td></tr> }
+            </tbody>
+          </table>
+          </div>
+        </div>
+      }
+
+      <!-- ============================ SUPPORT ============================ -->
+      @if (tab() === 'support') {
+        <p class="muted" style="margin-top:0">Customer support tickets. Open a thread to reply{{ canManage() ? '' : ' (read-only)' }} and set its status.</p>
+        <div class="layout-2">
+          <div class="card" style="padding:6px 16px">
+            <div class="table-scroll">
+            <table>
+              <thead><tr><th>Subject</th><th>Customer</th><th>Status</th><th>Updated</th></tr></thead>
+              <tbody>
+                @for (t of tickets(); track t.id) {
+                  <tr style="cursor:pointer" [class.sel]="activeTicket() === t.id" (click)="openTicket(t)">
+                    <td>{{ t.subject }}<br /><span class="muted" style="font-size:.8rem">{{ t.messages }} message(s)</span></td>
+                    <td>{{ t.customer_name || '—' }}<br /><span class="muted" style="font-size:.8rem">{{ t.customer_email }}</span></td>
+                    <td><span class="tag" [ngClass]="ticketTagClass(t.status)">{{ t.status }}</span></td>
+                    <td>{{ t.updated_at | date: 'short' }}</td>
+                  </tr>
+                } @empty { <tr><td colspan="4" class="muted center" style="padding:30px">No tickets.</td></tr> }
+              </tbody>
+            </table>
+            </div>
+          </div>
+
+          <div class="card pad">
+            @if (activeTicket() === null) {
+              <p class="muted">Select a ticket to view the conversation.</p>
+            } @else {
+              <div class="row spread" style="margin-bottom:10px">
+                <h3 style="margin:0">Conversation</h3>
+                @if (canManage()) {
+                  <select [ngModel]="activeStatus()" (ngModelChange)="setTicketStatus($event)">
+                    @for (s of ticketStatuses; track s) { <option [value]="s">{{ s }}</option> }
+                  </select>
+                }
+              </div>
+              <div class="thread">
+                @for (m of ticketMessages(); track m.id) {
+                  <div class="msg" [class.staff]="m.author_role === 'staff'">
+                    <div class="bubble">
+                      <div class="who">{{ m.author_role === 'staff' ? 'Support' : (m.author || 'Customer') }} · <span class="muted">{{ m.created_at | date: 'short' }}</span></div>
+                      <p>{{ m.body }}</p>
+                    </div>
+                  </div>
+                }
+              </div>
+              @if (canManage()) {
+                <div class="row" style="gap:8px;margin-top:10px;align-items:flex-start">
+                  <textarea rows="2" [(ngModel)]="ticketReply" placeholder="Reply as support…" style="flex:1"></textarea>
+                  <button class="btn" [disabled]="replyingTicket()" (click)="replyTicket()">Send</button>
+                </div>
+              }
+            }
+          </div>
+        </div>
+      }
+
       <!-- ============================ SECURITY ============================ -->
       @if (tab() === 'security') {
         <p class="muted" style="margin-top:0">Audit trail of admin actions and logins — most recent first.</p>
@@ -694,7 +793,16 @@ type Tab =
      .dropzone:hover { border-color:var(--brand); color:var(--brand); }
      .dropzone small { font-size:.76rem; }
      .uploader img { width:100%; max-height:180px; object-fit:cover; border-radius:12px; border:1px solid var(--border); display:block; }
-     .remove-img { position:absolute; top:10px; right:10px; width:30px; height:30px; padding:0; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; border:none; border-radius:999px; background:rgba(16,24,40,.65); color:#fff; }`,
+     .remove-img { position:absolute; top:10px; right:10px; width:30px; height:30px; padding:0; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; border:none; border-radius:999px; background:rgba(16,24,40,.65); color:#fff; }
+
+     tr.sel { background:#eef2ff; }
+     .thread { display:flex; flex-direction:column; gap:10px; max-height:420px; overflow-y:auto; }
+     .thread .msg { display:flex; }
+     .thread .msg.staff { justify-content:flex-end; }
+     .thread .bubble { max-width:80%; background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:9px 13px; }
+     .thread .msg.staff .bubble { background:#eef2ff; border-color:#dbe3ff; }
+     .thread .bubble .who { font-size:.76rem; font-weight:600; margin-bottom:3px; }
+     .thread .bubble p { margin:0; white-space:pre-wrap; }`,
   ],
 })
 export class AdminComponent implements OnInit {
@@ -740,6 +848,18 @@ export class AdminComponent implements OnInit {
   // Review moderation.
   reviews = signal<AdminReview[]>([]);
 
+  // Returns queue.
+  returns = signal<AdminReturn[]>([]);
+
+  // Support queue + the open conversation.
+  tickets = signal<AdminTicket[]>([]);
+  ticketStatuses = TICKET_STATUSES;
+  activeTicket = signal<number | null>(null);
+  activeStatus = signal<TicketStatus>('open');
+  ticketMessages = signal<SupportMessage[]>([]);
+  ticketReply = '';
+  replyingTicket = signal(false);
+
   // Role catalog for the Roles tab and the Users role <select>.
   roleInfo = ROLE_INFO;
 
@@ -771,6 +891,7 @@ export class AdminComponent implements OnInit {
   constructor(
     private productSvc: ProductService,
     private admin: AdminService,
+    private support: SupportService,
     private settingsSvc: SettingsService,
     public auth: AuthService
   ) {}
@@ -791,6 +912,8 @@ export class AdminComponent implements OnInit {
     if (tab === 'coupons') this.loadCoupons();
     if (tab === 'settings') this.loadSettings();
     if (tab === 'reviews') this.loadReviews();
+    if (tab === 'returns') this.loadReturns();
+    if (tab === 'support') this.loadTickets();
   }
 
   // Compact 5-star display, e.g. ★★★★☆.
@@ -840,6 +963,84 @@ export class AdminComponent implements OnInit {
   }
   loadSettings(): void {
     this.settingsSvc.get().subscribe((r) => (this.settingsForm = { store_name: '', banner: '', ...r.settings }));
+  }
+  loadReturns(): void {
+    this.admin.returns().subscribe((r) => this.returns.set(r.returns));
+  }
+
+  // ---- returns ----
+  returnTagClass(status: string): string {
+    return {
+      requested: 'status-processing',
+      approved: 'status-delivered',
+      rejected: 'status-cancelled',
+      refunded: 'status-cancelled',
+    }[status] || '';
+  }
+
+  setReturn(r: AdminReturn, status: ReturnStatus): void {
+    this.error.set('');
+    this.admin.setReturnStatus(r.id, status).subscribe({
+      next: () => {
+        this.flash(`Return #${r.id} marked ${status}`);
+        this.loadReturns();
+        if (status === 'refunded') this.loadOrders();
+      },
+      error: (e) => this.error.set(e?.error?.error || 'Could not update return'),
+    });
+  }
+
+  // ---- support ----
+  loadTickets(): void {
+    this.support.all().subscribe((r) => this.tickets.set(r.tickets));
+  }
+
+  ticketTagClass(status: string): string {
+    return {
+      open: 'status-processing',
+      pending: 'status-processing',
+      resolved: 'status-delivered',
+      closed: 'status-cancelled',
+    }[status] || '';
+  }
+
+  openTicket(t: AdminTicket): void {
+    this.activeTicket.set(t.id);
+    this.activeStatus.set(t.status);
+    this.ticketReply = '';
+    this.support.get(t.id).subscribe((r) => this.ticketMessages.set(r.messages));
+  }
+
+  replyTicket(): void {
+    const id = this.activeTicket();
+    const body = this.ticketReply.trim();
+    if (id === null || !body) return;
+    this.replyingTicket.set(true);
+    this.support.reply(id, body).subscribe({
+      next: (r) => {
+        this.replyingTicket.set(false);
+        this.ticketReply = '';
+        this.ticketMessages.update((list) => [...list, r.message]);
+        this.activeStatus.set('pending');
+        this.loadTickets();
+      },
+      error: (e) => {
+        this.replyingTicket.set(false);
+        this.error.set(e?.error?.error || 'Could not send reply');
+      },
+    });
+  }
+
+  setTicketStatus(status: TicketStatus): void {
+    const id = this.activeTicket();
+    if (id === null) return;
+    this.support.setStatus(id, status).subscribe({
+      next: () => {
+        this.activeStatus.set(status);
+        this.loadTickets();
+      },
+      error: (e) => this.error.set(e?.error?.error || 'Could not update ticket'),
+    });
   }
 
   // ---- coupons ----

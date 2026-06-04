@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ProductService } from '../core/product.service';
 import { CartService } from '../core/cart.service';
+import { WishlistService } from '../core/wishlist.service';
 import { AuthService } from '../core/auth.service';
 import { IconComponent } from '../core/icon.component';
 import { Product, Review, effectivePrice, hasDiscount } from '../core/models';
@@ -44,6 +45,9 @@ import { Product, Review, effectivePrice, hasDiscount } from '../core/models';
                   <button (click)="dec()">−</button><span>{{ qty() }}</span><button (click)="inc()">+</button>
                 </div>
                 <button class="btn" [disabled]="p.stock <= 0" (click)="add(p)">Add to cart</button>
+                <button class="btn ghost wish" [class.on]="wishlist.has(p.id)" (click)="toggleWish(p)">
+                  <app-icon name="heart" [size]="16" /> {{ wishlist.has(p.id) ? 'Wishlisted' : 'Wishlist' }}
+                </button>
               </div>
               @if (toast()) { <div class="alert ok">{{ toast() }}</div> }
             </div>
@@ -106,7 +110,10 @@ import { Product, Review, effectivePrice, hasDiscount } from '../core/models';
      .stars { color:#f59e0b; letter-spacing:1px; }
      .card.pad { padding:20px; }
      .star-btn { background:none; border:none; cursor:pointer; font-size:1.5rem; line-height:1; color:var(--border); padding:0 2px; }
-     .star-btn.on { color:#f59e0b; }`,
+     .star-btn.on { color:#f59e0b; }
+     .btn.wish { display:inline-flex; align-items:center; gap:6px; }
+     .btn.wish.on { color:#dc2626; border-color:#dc2626; }
+     .btn.wish.on app-icon ::ng-deep svg { fill:#dc2626; }`,
   ],
 })
 export class ProductDetailComponent implements OnInit {
@@ -133,6 +140,7 @@ export class ProductDetailComponent implements OnInit {
     private route: ActivatedRoute,
     private productSvc: ProductService,
     private cart: CartService,
+    public wishlist: WishlistService,
     public auth: AuthService,
     private router: Router
   ) {}
@@ -147,6 +155,16 @@ export class ProductDetailComponent implements OnInit {
       error: () => this.loading.set(false),
     });
     this.loadReviews(id);
+    if (this.auth.isLoggedIn()) this.wishlist.refresh();
+  }
+
+  // Add or remove this product from the wishlist (requires a login).
+  toggleWish(p: Product): void {
+    if (!this.auth.isLoggedIn()) {
+      this.router.navigate(['/login'], { queryParams: { redirect: '/product/' + p.id } });
+      return;
+    }
+    (this.wishlist.has(p.id) ? this.wishlist.remove(p.id) : this.wishlist.add(p)).subscribe();
   }
 
   // Compact 5-star display, e.g. ★★★★☆.

@@ -34,8 +34,19 @@
         @if (cart.state().count > 0) { <span class="badge">{{ cart.state().count }}</span> }
       </a>
       @if (auth.isLoggedIn()) {
+        <a routerLink="/wishlist" routerLinkActive="active">
+          <app-icon class="ic" name="heart" /> Wishlist
+          @if (wishlist.count() > 0) { <span class="badge">{{ wishlist.count() }}</span> }
+        </a>
         <a routerLink="/orders" routerLinkActive="active">
           <app-icon class="ic" name="orders" /> Orders
+        </a>
+        <a routerLink="/notifications" routerLinkActive="active">
+          <app-icon class="ic" name="bell" /> Notifications
+          @if (notif.unread() > 0) { <span class="badge">{{ notif.unread() }}</span> }
+        </a>
+        <a routerLink="/support" routerLinkActive="active">
+          <app-icon class="ic" name="message" /> Support
         </a>
       }
       @if (auth.canViewAdmin()) {

@@ -1,0 +1,70 @@
+# Render Blueprint — BACKEND ONLY (products + cart + their data stores).
+# Deploy: push this file, then in Render → New → Blueprint → pick this repo.
+# The frontend is intentionally NOT here; point it at the two service URLs below.
+#
+# Free tier notes:
+#   • Free web services spin down after ~15 min idle — first request is a slow cold start.
+#   • A free Postgres instance expires ~30 days after creation (upgrade to keep it).
+#   • Both APIs get public https://<name>.onrender.com URLs so you can curl them.
+
+databases:
+  - name: shopnow-postgres
+    databaseName: shopnow
+    user: shopnow
+    plan: free
+    region: oregon
+
+services:
+  # ---- Redis / Key Value (cart's per-user carts) --------------------------
+  - type: redis
+    name: shopnow-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: noeviction
+    ipAllowList: []          # empty = internal connections only (no public access)
+
+  # ---- Products / core API (owns Postgres: catalog, users, orders) --------
+  - type: web
+    name: shopnow-products
+    runtime: docker
+    region: oregon
+    plan: free
+    rootDir: app/products
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: PG_HOST
+        fromDatabase: { name: shopnow-postgres, property: host }
+      - key: PG_PORT
+        fromDatabase: { name: shopnow-postgres, property: port }
+      - key: PG_USER
+        fromDatabase: { name: shopnow-postgres, property: user }
+      - key: PG_PASSWORD
+        fromDatabase: { name: shopnow-postgres, property: password }
+      - key: PG_DATABASE
+        fromDatabase: { name: shopnow-postgres, property: database }
+      - fromGroup: shopnow-shared
+
+  # ---- Cart API (owns Redis; verifies the same JWTs) ----------------------
+  - type: web
+    name: shopnow-cart
+    runtime: docker
+    region: oregon
+    plan: free
+    rootDir: app/cart
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: REDIS_HOST
+        fromService: { type: redis, name: shopnow-redis, property: host }
+      - key: REDIS_PORT
+        fromService: { type: redis, name: shopnow-redis, property: port }
+      - fromGroup: shopnow-shared
+
+# Shared JWT signing secret — generated once, injected into BOTH services so the
+# token products mints is the token cart accepts. This is the critical wiring.
+envVarGroups:
+  - name: shopnow-shared
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true

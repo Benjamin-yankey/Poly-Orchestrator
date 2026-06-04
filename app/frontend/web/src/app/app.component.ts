@@ -2,6 +2,8 @@ import { Component, computed, effect, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet, Router } from '@angular/router';
 import { AuthService } from './core/auth.service';
 import { CartService } from './core/cart.service';
+import { WishlistService } from './core/wishlist.service';
+import { NotificationService } from './core/notification.service';
 import { IconComponent } from './core/icon.component';
 
 @Component({
@@ -24,12 +26,25 @@ export class AppComponent {
     return letters.toUpperCase();
   });
 
-  constructor(public auth: AuthService, public cart: CartService, private router: Router) {
-    // Whenever the logged-in user changes, sync the cart: load it on login,
-    // empty the in-memory copy on logout.
+  constructor(
+    public auth: AuthService,
+    public cart: CartService,
+    public wishlist: WishlistService,
+    public notif: NotificationService,
+    private router: Router
+  ) {
+    // Whenever the logged-in user changes, sync per-user state: load the cart,
+    // wishlist and notifications on login, empty the in-memory copies on logout.
     effect(() => {
-      if (this.auth.isLoggedIn()) this.cart.refresh();
-      else this.cart.reset();
+      if (this.auth.isLoggedIn()) {
+        this.cart.refresh();
+        this.wishlist.refresh();
+        this.notif.refresh();
+      } else {
+        this.cart.reset();
+        this.wishlist.reset();
+        this.notif.reset();
+      }
     });
   }
 

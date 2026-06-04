@@ -89,6 +89,10 @@ import { Listing, Order } from '../core/models';
           <div class="card pad">
             <h3>Quick links</h3>
             <a class="ql" routerLink="/orders"><app-icon name="orders" [size]="18" /> <span>Order history</span> <app-icon name="chevron-down" [size]="16" class="chev" /></a>
+            <a class="ql" routerLink="/wishlist"><app-icon name="heart" [size]="18" /> <span>Your wishlist</span> <app-icon name="chevron-down" [size]="16" class="chev" /></a>
+            <a class="ql" routerLink="/addresses"><app-icon name="location" [size]="18" /> <span>Saved addresses</span> <app-icon name="chevron-down" [size]="16" class="chev" /></a>
+            <a class="ql" routerLink="/payment-methods"><app-icon name="card" [size]="18" /> <span>Payment methods</span> <app-icon name="chevron-down" [size]="16" class="chev" /></a>
+            <a class="ql" routerLink="/support"><app-icon name="message" [size]="18" /> <span>Support center</span> <app-icon name="chevron-down" [size]="16" class="chev" /></a>
             <a class="ql" routerLink="/sell"><app-icon name="sell" [size]="18" /> <span>Post a new listing</span> <app-icon name="chevron-down" [size]="16" class="chev" /></a>
             <a class="ql" routerLink="/marketplace"><app-icon name="marketplace" [size]="18" /> <span>Browse marketplace</span> <app-icon name="chevron-down" [size]="16" class="chev" /></a>
             @if (auth.isAdmin()) {

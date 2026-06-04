@@ -21,6 +21,11 @@ const JWT_SECRET = process.env.JWT_SECRET || "shopnow_dev_secret_change_me";
 
 const who = () => process.env.HOSTNAME || "unknown";
 const cartKey = (userId) => `shopnow:cart:${userId}`;
+// Wishlist + save-for-later are per-user item collections — the same Redis-hash
+// shape as the cart (field = productId, value = JSON line item), so a buyer can
+// keep things for later without them counting toward the cart total. Each "shelf"
+// is keyed by kind so one helper serves both.
+const shelfKey = (kind, userId) => `shopnow:${kind}:${userId}`;
 
 let redisClient;
 (async () => {
@@ -56,6 +61,16 @@ async function cartState(userId) {
   const count = items.reduce((s, it) => s + it.qty, 0);
   const subtotal = items.reduce((s, it) => s + Number(it.price) * it.qty, 0);
   return { servedBy: who(), items, count, subtotal: Number(subtotal.toFixed(2)) };
+}
+
+// Read a shelf (wishlist / saved-for-later) for a user. Unlike the cart there is
+// no notion of a "total" the customer pays now, but we still expose count.
+async function shelfState(kind, userId) {
+  const map = await redisClient.hGetAll(shelfKey(kind, userId));
+  const items = Object.values(map)
+    .map((v) => JSON.parse(v))
+    .sort((a, b) => a.productId - b.productId);
+  return { servedBy: who(), items, count: items.length };
 }
 
 app.get("/health", (_req, res) => res.json({ status: "ok", service: "cart" }));
@@ -138,6 +153,87 @@ app.delete("/api/cart", authRequired, async (req, res) => {
   try {
     await redisClient.del(cartKey(req.user.sub));
     res.json(await cartState(req.user.sub));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Wishlist — items a shopper saved to buy later (no quantity, no total).
+// ---------------------------------------------------------------------------
+app.get("/api/wishlist", authRequired, async (req, res) => {
+  try {
+    res.json(await shelfState("wishlist", req.user.sub));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Add a product to the wishlist (idempotent — already-present items are kept).
+// Body: { productId, name, price, icon }
+app.post("/api/wishlist", authRequired, async (req, res) => {
+  try {
+    const { productId, name, price, icon } = req.body || {};
+    if (productId == null || name == null || price == null) {
+      return res.status(400).json({ error: "productId, name and price are required" });
+    }
+    await redisClient.hSet(
+      shelfKey("wishlist", req.user.sub),
+      String(productId),
+      JSON.stringify({ productId, name, price, icon: icon || "📦" })
+    );
+    res.json(await shelfState("wishlist", req.user.sub));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Remove an item from the wishlist. Body: { productId }
+app.post("/api/wishlist/remove", authRequired, async (req, res) => {
+  try {
+    const { productId } = req.body || {};
+    if (productId != null) await redisClient.hDel(shelfKey("wishlist", req.user.sub), String(productId));
+    res.json(await shelfState("wishlist", req.user.sub));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Save for later — cart lines parked off to the side (keep their quantity).
+// ---------------------------------------------------------------------------
+app.get("/api/saved", authRequired, async (req, res) => {
+  try {
+    res.json(await shelfState("saved", req.user.sub));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Park an item for later. Body: { productId, name, price, icon, qty }
+app.post("/api/saved", authRequired, async (req, res) => {
+  try {
+    const { productId, name, price, icon, qty } = req.body || {};
+    if (productId == null || name == null || price == null) {
+      return res.status(400).json({ error: "productId, name and price are required" });
+    }
+    await redisClient.hSet(
+      shelfKey("saved", req.user.sub),
+      String(productId),
+      JSON.stringify({ productId, name, price, icon: icon || "📦", qty: Number(qty) > 0 ? Number(qty) : 1 })
+    );
+    res.json(await shelfState("saved", req.user.sub));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Remove a parked item. Body: { productId }
+app.post("/api/saved/remove", authRequired, async (req, res) => {
+  try {
+    const { productId } = req.body || {};
+    if (productId != null) await redisClient.hDel(shelfKey("saved", req.user.sub), String(productId));
+    res.json(await shelfState("saved", req.user.sub));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

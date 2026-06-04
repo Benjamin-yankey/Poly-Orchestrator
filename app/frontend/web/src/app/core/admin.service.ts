@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
+  AdminReturn,
   AdminReview,
   AdminStats,
   AdminUser,
@@ -11,6 +12,7 @@ import {
   Listing,
   Order,
   OrderStatus,
+  ReturnStatus,
   Role,
 } from './models';
 
@@ -126,5 +128,14 @@ export class AdminService {
 
   removeReview(id: number): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>(`/api/admin/reviews/${id}`);
+  }
+
+  // ---- returns queue ----
+  returns(): Observable<{ returns: AdminReturn[] }> {
+    return this.http.get<{ returns: AdminReturn[] }>('/api/admin/returns');
+  }
+
+  setReturnStatus(id: number, status: ReturnStatus): Observable<{ return: AdminReturn }> {
+    return this.http.put<{ return: AdminReturn }>(`/api/admin/returns/${id}/status`, { status });
   }
 }

@@ -162,6 +162,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand); bor
   box-shadow: 0 24px 60px rgba(16, 24, 40, 0.35);
 }
 @media (max-width: 560px) {
+  /* On short/narrow viewports the hero + card + demo-login note are taller than
+     the screen. Centering would push the card below the fold, so flow from the
+     top and let the page scroll to keep the login form reachable. */
+  .auth-page { justify-content: flex-start; gap: 18px; padding: 24px 16px; }
   .auth-hero h2 { font-size: 1.6rem; }
 }
 

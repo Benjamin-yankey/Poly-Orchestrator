@@ -2,9 +2,10 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { CartService } from '../core/cart.service';
+import { SavedService } from '../core/saved.service';
 import { AuthService } from '../core/auth.service';
 import { IconComponent } from '../core/icon.component';
-import { CartItem } from '../core/models';
+import { CartItem, ShelfItem } from '../core/models';
 
 @Component({
   selector: 'app-cart',
@@ -41,7 +42,10 @@ import { CartItem } from '../core/models';
                   <button (click)="setQty(it, it.qty + 1)">+</button>
                 </div>
                 <div class="price">\${{ (+it.price * it.qty).toFixed(2) }}</div>
-                <button class="btn ghost sm danger" style="color:var(--danger)" (click)="remove(it)">Remove</button>
+                <div class="line-actions">
+                  <button class="btn ghost sm" (click)="saveForLater(it)">Save for later</button>
+                  <button class="btn ghost sm danger" style="color:var(--danger)" (click)="remove(it)">Remove</button>
+                </div>
               </div>
             }
           </div>
@@ -57,14 +61,45 @@ import { CartItem } from '../core/models';
           </div>
         </div>
       }
+
+      @if (auth.isLoggedIn() && saved.state().items.length > 0) {
+        <div class="page-head" style="margin-top:28px"><h2 style="margin:0">Saved for later</h2></div>
+        <div class="card" style="padding:6px 22px">
+          @for (it of saved.state().items; track it.productId) {
+            <div class="cart-line">
+              <div class="ic"><app-icon name="image" [size]="24" /></div>
+              <div>
+                <strong>{{ it.name }}</strong><br />
+                <span class="muted">\${{ (+it.price).toFixed(2) }} each · qty {{ it.qty }}</span>
+              </div>
+              <div class="price">\${{ (+it.price * (it.qty || 1)).toFixed(2) }}</div>
+              <div class="line-actions">
+                <button class="btn ghost sm" (click)="moveToCart(it)">Move to cart</button>
+                <button class="btn ghost sm danger" style="color:var(--danger)" (click)="removeSaved(it)">Remove</button>
+              </div>
+            </div>
+          }
+        </div>
+      }
     </div>
   `,
+  styles: [
+    `.line-actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }`,
+  ],
 })
 export class CartComponent implements OnInit {
-  constructor(public cart: CartService, public auth: AuthService, private router: Router) {}
+  constructor(
+    public cart: CartService,
+    public saved: SavedService,
+    public auth: AuthService,
+    private router: Router
+  ) {}
 
   ngOnInit(): void {
-    if (this.auth.isLoggedIn()) this.cart.refresh();
+    if (this.auth.isLoggedIn()) {
+      this.cart.refresh();
+      this.saved.refresh();
+    }
   }
 
   setQty(it: CartItem, qty: number): void {
@@ -73,6 +108,20 @@ export class CartComponent implements OnInit {
 
   remove(it: CartItem): void {
     this.cart.remove(it.productId).subscribe();
+  }
+
+  // Park a cart line on the save-for-later shelf, then drop it from the cart.
+  saveForLater(it: CartItem): void {
+    this.saved.save(it).subscribe(() => this.cart.remove(it.productId).subscribe());
+  }
+
+  // Bring a parked item back into the cart, then remove it from the shelf.
+  moveToCart(it: ShelfItem): void {
+    this.cart.addShelfItem(it).subscribe(() => this.saved.remove(it.productId).subscribe());
+  }
+
+  removeSaved(it: ShelfItem): void {
+    this.saved.remove(it.productId).subscribe();
   }
 
   clear(): void {
