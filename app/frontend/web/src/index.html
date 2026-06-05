@@ -9,6 +9,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Apply the saved/system theme before first paint to avoid a flash of the
+       wrong palette. ThemeService reconciles this once Angular boots. -->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('shopnow.theme');
+        var dark = saved === 'dark' || (!saved && window.matchMedia &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <app-root></app-root>

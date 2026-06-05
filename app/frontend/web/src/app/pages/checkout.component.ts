@@ -127,7 +127,7 @@ import { Address, Coupon, Order, PaymentDetails, PaymentMethod } from '../core/m
     `.pick { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--border);
        border-radius:10px; margin-bottom:10px; cursor:pointer; }
      .pick input { width:auto; margin-top:3px; }
-     .pick:has(input:checked) { border-color:var(--brand); background:#eef2ff; }`,
+     .pick:has(input:checked) { border-color:var(--brand); background:var(--tint-brand); }`,
   ],
 })
 export class CheckoutComponent implements OnInit {

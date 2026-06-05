@@ -72,7 +72,7 @@ import { PaymentMethod } from '../core/models';
   `,
   styles: [
     `.card.pad { padding:20px; }
-     .tag.role-admin { background:#eef2ff; color:var(--brand); }
+     .tag.role-admin { background:var(--tint-brand); color:var(--brand); }
      .check { display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:500; }
      .check input { width:auto; }
      strong app-icon { vertical-align:-3px; margin-right:4px; }`,

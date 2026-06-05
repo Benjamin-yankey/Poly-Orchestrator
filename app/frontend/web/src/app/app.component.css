@@ -25,15 +25,41 @@
   z-index: 60;
 }
 
+/* Sidebar header: brand on the left, collapse toggle on the right. */
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+}
 .sidebar-brand {
   font-weight: 800;
   font-size: 1.35rem;
   letter-spacing: -0.02em;
   color: var(--ink);
-  padding: 4px 10px 18px;
+  padding: 4px 6px;
+  min-width: 0;
 }
 .sidebar-brand:hover { text-decoration: none; }
 .sidebar-brand .dot { color: var(--brand); }
+
+/* Desktop collapse toggle. */
+.collapse-btn {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease;
+}
+.collapse-btn:hover { color: var(--brand); border-color: var(--brand); }
 
 .side-nav {
   display: flex;
@@ -122,11 +148,73 @@
 }
 .foot-link:hover { background: var(--bg); color: var(--ink); text-decoration: none; }
 .foot-link .ic { flex: none; display: inline-flex; }
+/* Footer tools (theme toggle, tour) are <button>s styled like the nav links. */
+button.foot-link {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 
 /* ---------- Main content ---------- */
 .main {
   margin-left: var(--sidebar-w);
   min-height: 100vh;
+}
+
+/* ---------- Collapsed icon rail (desktop only) ---------- */
+/* The collapse toggle re-tints --sidebar-w, which both the sidebar and the main
+   content's left margin read from, so the layout reflows automatically. Labels
+   are hidden and reappear as a floating pill on hover. */
+@media (min-width: 861px) {
+  .app-shell.collapsed { --sidebar-w: 78px; }
+  .app-shell.collapsed .sidebar { padding-left: 12px; padding-right: 12px; }
+
+  .app-shell.collapsed .sidebar-head { justify-content: center; }
+  .app-shell.collapsed .sidebar-brand { display: none; }
+
+  .app-shell.collapsed .side-nav a,
+  .app-shell.collapsed .foot-link { justify-content: center; padding-left: 0; padding-right: 0; position: relative; }
+  .app-shell.collapsed .side-nav a .label,
+  .app-shell.collapsed .foot-link .label { display: none; }
+
+  /* Count badge becomes a small dot pinned to the icon when collapsed. */
+  .app-shell.collapsed .side-nav .badge {
+    position: absolute;
+    top: 6px;
+    right: 12px;
+    margin: 0;
+    min-width: 16px;
+    padding: 0 4px;
+    font-size: 0.62rem;
+    line-height: 16px;
+  }
+
+  /* Profile widget shrinks to just the avatar. */
+  .app-shell.collapsed .profile-card { justify-content: center; }
+  .app-shell.collapsed .profile-card .meta { display: none; }
+
+  /* Hover flyout: surface the hidden label as a floating pill. */
+  .app-shell.collapsed .side-nav a:hover .label,
+  .app-shell.collapsed .foot-link:hover .label {
+    display: block;
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--ink);
+    color: var(--surface);
+    padding: 5px 10px;
+    border-radius: 8px;
+    white-space: nowrap;
+    font-size: 0.85rem;
+    font-weight: 600;
+    z-index: 80;
+    box-shadow: var(--shadow);
+    pointer-events: none;
+  }
 }
 
 /* ---------- Mobile top bar (hidden on desktop) ---------- */
@@ -175,6 +263,10 @@
     font-size: 0.66rem;
     padding: 1px 6px;
   }
+
+  /* The icon-rail collapse is desktop-only; on mobile the sidebar is off-canvas
+     and always shows full labels when open. */
+  .collapse-btn { display: none; }
 
   /* Off-canvas sidebar. */
   .sidebar {

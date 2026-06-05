@@ -1,21 +1,30 @@
-import { Component, computed, effect, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet, Router } from '@angular/router';
 import { AuthService } from './core/auth.service';
 import { CartService } from './core/cart.service';
 import { WishlistService } from './core/wishlist.service';
 import { NotificationService } from './core/notification.service';
+import { ThemeService } from './core/theme.service';
+import { TourService } from './core/tour.service';
 import { IconComponent } from './core/icon.component';
+import { ChatWidgetComponent } from './chat-widget.component';
+
+const COLLAPSE_KEY = 'shopnow.sidebarCollapsed';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, IconComponent],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, IconComponent, ChatWidgetComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
 })
-export class AppComponent {
+export class AppComponent implements OnInit {
   // Sidebar is always visible on desktop; on mobile it slides in/out.
   readonly sidebarOpen = signal(false);
+
+  // Desktop only: collapse the sidebar to a slim icon rail. Persisted so the
+  // user's preference survives reloads.
+  readonly collapsed = signal(this.readCollapsed());
 
   // Initials shown in the sidebar profile avatar (e.g. "Demo Customer" -> "DC").
   readonly initials = computed(() => {
@@ -31,6 +40,8 @@ export class AppComponent {
     public cart: CartService,
     public wishlist: WishlistService,
     public notif: NotificationService,
+    public theme: ThemeService,
+    public tour: TourService,
     private router: Router
   ) {
     // Whenever the logged-in user changes, sync per-user state: load the cart,
@@ -48,12 +59,36 @@ export class AppComponent {
     });
   }
 
+  ngOnInit(): void {
+    this.theme.init();
+    // First-visit walkthrough (desktop only; no-op once seen).
+    this.tour.maybeAutoStart();
+  }
+
   toggleSidebar(): void {
     this.sidebarOpen.update((v) => !v);
   }
 
   closeSidebar(): void {
     this.sidebarOpen.set(false);
+  }
+
+  toggleCollapse(): void {
+    const next = !this.collapsed();
+    this.collapsed.set(next);
+    try {
+      localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0');
+    } catch {
+      /* storage may be unavailable — collapse still applies for the session */
+    }
+  }
+
+  private readCollapsed(): boolean {
+    try {
+      return localStorage.getItem(COLLAPSE_KEY) === '1';
+    } catch {
+      return false;
+    }
   }
 
   logout(): void {

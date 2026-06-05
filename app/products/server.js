@@ -9,6 +9,7 @@
 // "3 services, database-per-service" shape the ECS-vs-EKS benchmark relies on.
 
 const express = require("express");
+const crypto = require("crypto");
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const {
@@ -28,6 +29,12 @@ app.disable("x-powered-by");
 // can be a few MB. Raise the limit well above express's 100kb default.
 app.use(express.json({ limit: "8mb" }));
 const PORT = process.env.PORT || 5001;
+
+// Google "Continue with Google" sign-in. Set GOOGLE_CLIENT_ID to the OAuth 2.0
+// Web client ID from the Google Cloud console to enable it; left empty, the
+// /api/auth/google endpoint reports the feature as not configured. The same ID
+// must be set on the frontend (src/app/core/config.ts).
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 
 const pool = new Pool({
   host: process.env.PG_HOST || "postgres",
@@ -232,6 +239,8 @@ async function initDb() {
     -- Employees belong to an operational department (support, warehouse, …) that
     -- decides which dashboard areas they can use. NULL for non-employee roles.
     ALTER TABLE users ADD COLUMN IF NOT EXISTS department TEXT;
+    -- Google account linkage ("Continue with Google"); null for password users.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT;
     -- Audit trail: every admin mutation and every login is appended here so the
     -- Security tab can show who did what, when.
     CREATE TABLE IF NOT EXISTS audit_log (
@@ -778,6 +787,75 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(403).json({ error: "this account has been disabled" });
     }
     audit(user, "auth.login", "user:" + user.id, user.email);
+    res.json({ token: signToken(user), user: publicUser(user) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// "Continue with Google". The frontend obtains a Google ID token (JWT) via
+// Google Identity Services and posts it here as `credential`. We verify it with
+// Google's tokeninfo endpoint (no extra dependency), then find-or-create the
+// matching customer and issue our own app JWT — the rest of the app is unchanged.
+app.post("/api/auth/google", async (req, res) => {
+  try {
+    if (!GOOGLE_CLIENT_ID) {
+      return res.status(501).json({ error: "Google sign-in is not configured" });
+    }
+    const { credential } = req.body || {};
+    if (!credential) return res.status(400).json({ error: "credential is required" });
+
+    // Verify the ID token with Google (validates signature + expiry server-side).
+    let payload;
+    try {
+      const r = await fetch(
+        "https://oauth2.googleapis.com/tokeninfo?id_token=" + encodeURIComponent(credential)
+      );
+      if (!r.ok) throw new Error("token rejected");
+      payload = await r.json();
+    } catch {
+      return res.status(401).json({ error: "could not verify Google sign-in" });
+    }
+
+    // The token must be issued by Google, for our client, and the email verified.
+    const issuers = ["accounts.google.com", "https://accounts.google.com"];
+    if (
+      payload.aud !== GOOGLE_CLIENT_ID ||
+      !issuers.includes(payload.iss) ||
+      String(payload.email_verified) !== "true" ||
+      !payload.email
+    ) {
+      return res.status(401).json({ error: "invalid Google sign-in" });
+    }
+
+    const email = String(payload.email).toLowerCase();
+    const name = payload.name || payload.given_name || email.split("@")[0];
+
+    // Find the existing account, or create a new customer for this Google user.
+    let { rows } = await pool.query("SELECT * FROM users WHERE email=$1", [email]);
+    let user = rows[0];
+    if (user) {
+      if (user.active === false) {
+        return res.status(403).json({ error: "this account has been disabled" });
+      }
+      // Link the Google subject on first Google login for an existing account.
+      if (!user.google_sub) {
+        await pool.query("UPDATE users SET google_sub=$2 WHERE id=$1", [user.id, payload.sub]);
+      }
+    } else {
+      // Password-login is unavailable for Google users until they set one; store
+      // an unguessable random hash so the column stays NOT NULL and login fails.
+      const randomHash = await bcrypt.hash(crypto.randomBytes(24).toString("hex"), 10);
+      ({ rows } = await pool.query(
+        `INSERT INTO users (email, password_hash, name, role, google_sub)
+         VALUES ($1,$2,$3,'customer',$4)
+         RETURNING *`,
+        [email, randomHash, name, payload.sub]
+      ));
+      user = rows[0];
+    }
+
+    audit(user, "auth.login", "user:" + user.id, user.email + " (google)");
     res.json({ token: signToken(user), user: publicUser(user) });
   } catch (e) {
     res.status(500).json({ error: e.message });

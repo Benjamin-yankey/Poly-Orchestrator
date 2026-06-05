@@ -84,7 +84,7 @@ import { Address } from '../core/models';
   styles: [
     `.card.pad { padding:20px; }
      .addr p { line-height:1.5; }
-     .tag.role-admin { background:#eef2ff; color:var(--brand); }
+     .tag.role-admin { background:var(--tint-brand); color:var(--brand); }
      .check { display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:500; }
      .check input { width:auto; }`,
   ],

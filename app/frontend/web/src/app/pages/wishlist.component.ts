@@ -32,11 +32,11 @@ import { ShelfItem } from '../core/models';
                 @else { <app-icon name="image" [size]="44" /> }
               </a>
               <h3><a [routerLink]="['/product', it.productId]">{{ it.name }}</a></h3>
-              <div class="row spread" style="margin-top:10px">
+              <div class="row spread actions">
                 <span class="price">\${{ (+it.price).toFixed(2) }}</span>
-                <div class="row" style="gap:6px">
+                <div class="row btns">
                   <button class="btn sm" (click)="moveToCart(it)">Add to cart</button>
-                  <button class="btn ghost sm danger" style="color:var(--danger)" (click)="remove(it)">Remove</button>
+                  <button class="btn ghost sm danger" (click)="remove(it)">Remove</button>
                 </div>
               </div>
             </div>
@@ -52,7 +52,10 @@ import { ShelfItem } from '../core/models';
        border-radius:12px; background:var(--bg); color:var(--muted); margin-bottom:10px; }
      .media .emoji { font-size:3rem; }
      .product h3 a { color:var(--ink); }
-     .product h3 a:hover { color:var(--brand); }`,
+     .product h3 a:hover { color:var(--brand); }
+     /* Price + actions wrap to a second line on narrow cards instead of cramping. */
+     .actions { margin-top:10px; flex-wrap:wrap; gap:10px; }
+     .actions .btns { gap:8px; flex-wrap:wrap; }`,
   ],
 })
 export class WishlistComponent implements OnInit {

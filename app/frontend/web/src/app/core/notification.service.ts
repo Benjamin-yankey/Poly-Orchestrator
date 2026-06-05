@@ -13,9 +13,9 @@ export class NotificationService {
 
   constructor(private http: HttpClient) {}
 
-  refresh(): void {
+  refresh(limit = 50): void {
     this.http
-      .get<{ notifications: AppNotification[]; unread: number }>('/api/notifications')
+      .get<{ notifications: AppNotification[]; unread: number }>(`/api/notifications?limit=${limit}`)
       .subscribe({
         next: (r) => {
           this.items.set(r.notifications);

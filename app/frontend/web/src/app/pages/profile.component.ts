@@ -146,7 +146,7 @@ import { Listing, Order } from '../core/models';
      .badges { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
      .badges .small { font-size:.82rem; }
      .tag { display:inline-flex; align-items:center; gap:5px; }
-     .tag.role-admin { background:#eef2ff; color:var(--brand); }
+     .tag.role-admin { background:var(--tint-brand); color:var(--brand); }
      .tag.role-cust { background:var(--bg); color:var(--muted); }
      .avatar {
        display:inline-flex; align-items:center; justify-content:center; flex:none;
@@ -157,8 +157,8 @@ import { Listing, Order } from '../core/models';
 
      .stat { display:flex; align-items:center; gap:14px; }
      .stat .ico { width:40px; height:40px; flex:none; border-radius:11px; display:flex; align-items:center; justify-content:center; }
-     .stat .ico.brand { background:#eef2ff; color:var(--brand); }
-     .stat .ico.accent { background:#ecfdf5; color:var(--accent); }
+     .stat .ico.brand { background:var(--tint-brand); color:var(--brand); }
+     .stat .ico.accent { background:var(--tint-accent); color:var(--accent); }
      .stat .n { font-size:1.4rem; font-weight:800; line-height:1.1; }
      .stat .l { color:var(--muted); font-size:.82rem; }
 

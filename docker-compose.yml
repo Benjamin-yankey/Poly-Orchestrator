@@ -52,6 +52,9 @@ services:
       PG_DATABASE: shopnow
       # Shared signing secret for JWTs — MUST match the cart service.
       JWT_SECRET: ${JWT_SECRET:-shopnow_dev_secret_change_me}
+      # "Continue with Google": OAuth Web client ID (also set on the frontend in
+      # src/app/core/config.ts). Empty by default → the feature stays disabled.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     depends_on:
       postgres:
         condition: service_healthy

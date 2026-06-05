@@ -59,8 +59,9 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/profile.component').then((m) => m.ProfileComponent),
   },
   {
+    // Public so guests can read FAQs, contact info and attempt order tracking.
+    // Submitting a ticket / the dashboard are gated in-page on sign-in.
     path: 'support',
-    canActivate: [authGuard],
     loadComponent: () => import('./pages/support.component').then((m) => m.SupportComponent),
   },
   {

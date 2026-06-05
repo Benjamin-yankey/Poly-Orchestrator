@@ -57,6 +57,14 @@ export class AuthService {
       .pipe(tap((r) => this.persist(r)));
   }
 
+  // Exchange a Google ID token (from Google Identity Services) for an app session.
+  // The backend verifies it with Google and finds-or-creates the matching account.
+  loginWithGoogle(credential: string): Observable<AuthResponse> {
+    return this.http
+      .post<AuthResponse>('/api/auth/google', { credential })
+      .pipe(tap((r) => this.persist(r)));
+  }
+
   // Update the signed-in user's profile (name and/or password). On success the
   // reactive user signal is refreshed so the whole app reflects the new name.
   updateProfile(changes: ProfileUpdate): Observable<{ user: User }> {

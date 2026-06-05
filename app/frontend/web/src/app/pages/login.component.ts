@@ -4,11 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { IconComponent } from '../core/icon.component';
+import { GoogleButtonComponent } from './google-button.component';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, IconComponent],
+  imports: [CommonModule, FormsModule, RouterLink, IconComponent, GoogleButtonComponent],
   template: `
     <div class="auth-page">
       <div class="auth-hero">
@@ -31,6 +32,8 @@ import { IconComponent } from '../core/icon.component';
             {{ loading() ? 'Signing in…' : 'Sign in' }}
           </button>
         </form>
+
+        <app-google-button [redirect]="redirect" (failed)="error.set($event)" />
 
         <p class="muted center" style="margin-top:18px">
           New here? <a routerLink="/register" [queryParams]="{ redirect }">Create an account</a>

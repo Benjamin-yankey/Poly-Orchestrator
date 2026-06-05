@@ -13,70 +13,100 @@
 <!-- Dim overlay behind the sidebar on mobile. -->
 @if (sidebarOpen()) { <div class="scrim" (click)="closeSidebar()"></div> }
 
-<div class="app-shell">
+<div class="app-shell" [class.collapsed]="collapsed()">
   <aside class="sidebar" [class.open]="sidebarOpen()">
-    <a routerLink="/" class="brand sidebar-brand" (click)="closeSidebar()">Shop<span class="dot">Now</span></a>
+    <div class="sidebar-head">
+      <a routerLink="/" class="brand sidebar-brand" data-tour="brand" (click)="closeSidebar()">
+        Shop<span class="dot">Now</span>
+      </a>
+      <!-- Desktop-only collapse toggle: shrinks the sidebar to an icon rail. -->
+      <button
+        class="collapse-btn"
+        data-tour="collapse"
+        (click)="toggleCollapse()"
+        [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+        [title]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+      >
+        <app-icon [name]="collapsed() ? 'chevron-right' : 'chevron-left'" [size]="18" />
+      </button>
+    </div>
 
     <nav class="side-nav" (click)="closeSidebar()">
-      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">
-        <app-icon class="ic" name="shop" /> Shop
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" data-tour="shop" title="Shop">
+        <app-icon class="ic" name="shop" /> <span class="label">Shop</span>
       </a>
-      <a routerLink="/marketplace" routerLinkActive="active">
-        <app-icon class="ic" name="marketplace" /> Marketplace
+      <a routerLink="/marketplace" routerLinkActive="active" data-tour="marketplace" title="Marketplace">
+        <app-icon class="ic" name="marketplace" /> <span class="label">Marketplace</span>
       </a>
       @if (auth.isLoggedIn()) {
-        <a routerLink="/sell" routerLinkActive="active">
-          <app-icon class="ic" name="sell" /> Sell an item
+        <a routerLink="/sell" routerLinkActive="active" title="Sell an item">
+          <app-icon class="ic" name="sell" /> <span class="label">Sell an item</span>
         </a>
       }
-      <a routerLink="/cart" routerLinkActive="active">
-        <app-icon class="ic" name="cart" /> Cart
+      <a routerLink="/cart" routerLinkActive="active" data-tour="cart" title="Cart">
+        <app-icon class="ic" name="cart" /> <span class="label">Cart</span>
         @if (cart.state().count > 0) { <span class="badge">{{ cart.state().count }}</span> }
       </a>
       @if (auth.isLoggedIn()) {
-        <a routerLink="/wishlist" routerLinkActive="active">
-          <app-icon class="ic" name="heart" /> Wishlist
+        <a routerLink="/wishlist" routerLinkActive="active" title="Wishlist">
+          <app-icon class="ic" name="heart" /> <span class="label">Wishlist</span>
           @if (wishlist.count() > 0) { <span class="badge">{{ wishlist.count() }}</span> }
         </a>
-        <a routerLink="/orders" routerLinkActive="active">
-          <app-icon class="ic" name="orders" /> Orders
+        <a routerLink="/orders" routerLinkActive="active" title="Orders">
+          <app-icon class="ic" name="orders" /> <span class="label">Orders</span>
         </a>
-        <a routerLink="/notifications" routerLinkActive="active">
-          <app-icon class="ic" name="bell" /> Notifications
+        <a routerLink="/notifications" routerLinkActive="active" title="Notifications">
+          <app-icon class="ic" name="bell" /> <span class="label">Notifications</span>
           @if (notif.unread() > 0) { <span class="badge">{{ notif.unread() }}</span> }
         </a>
-        <a routerLink="/support" routerLinkActive="active">
-          <app-icon class="ic" name="message" /> Support
+        <a routerLink="/support" routerLinkActive="active" title="Support">
+          <app-icon class="ic" name="message" /> <span class="label">Support</span>
         </a>
       }
       @if (auth.isEmployee() || auth.isAdmin()) {
-        <a routerLink="/employee" routerLinkActive="active">
-          <app-icon class="ic" name="inbox" /> Employee
+        <a routerLink="/employee" routerLinkActive="active" title="Employee">
+          <app-icon class="ic" name="inbox" /> <span class="label">Employee</span>
         </a>
       }
       @if (auth.canViewAdmin()) {
-        <a routerLink="/admin" routerLinkActive="active">
-          <app-icon class="ic" name="admin" /> Admin
+        <a routerLink="/admin" routerLinkActive="active" title="Admin">
+          <app-icon class="ic" name="admin" /> <span class="label">Admin</span>
         </a>
       }
     </nav>
 
     <div class="sidebar-foot">
+      <!-- Theme toggle (light / dark). -->
+      <button
+        class="foot-link tool"
+        data-tour="theme"
+        (click)="theme.toggle()"
+        [title]="theme.theme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+      >
+        <app-icon class="ic" [name]="theme.theme() === 'dark' ? 'sun' : 'moon'" [size]="18" />
+        <span class="label">{{ theme.theme() === 'dark' ? 'Light mode' : 'Dark mode' }}</span>
+      </button>
+
+      <!-- Replay the guided tour. -->
+      <button class="foot-link tool" (click)="tour.run()" title="Take a tour">
+        <app-icon class="ic" name="help" [size]="18" /> <span class="label">Take a tour</span>
+      </button>
+
       @if (auth.isLoggedIn()) {
         <!-- Profile widget: present on every page via the shared shell. -->
-        <a routerLink="/profile" routerLinkActive="active" class="profile-card" (click)="closeSidebar()">
+        <a routerLink="/profile" routerLinkActive="active" class="profile-card" data-tour="account" (click)="closeSidebar()" title="Your profile">
           <span class="avatar">{{ initials() }}</span>
           <span class="meta">
             <strong>{{ auth.user()?.name || 'Your profile' }}</strong>
             <span class="muted">{{ auth.user()?.email }}</span>
           </span>
         </a>
-        <a href="javascript:void(0)" class="foot-link" (click)="logout()">
-          <app-icon class="ic" name="logout" [size]="18" /> Logout
+        <a href="javascript:void(0)" class="foot-link" (click)="logout()" title="Logout">
+          <app-icon class="ic" name="logout" [size]="18" /> <span class="label">Logout</span>
         </a>
       } @else {
-        <a routerLink="/login" class="foot-link" (click)="closeSidebar()">
-          <app-icon class="ic" name="user" [size]="18" /> Login / Register
+        <a routerLink="/login" class="foot-link" data-tour="account" (click)="closeSidebar()" title="Login / Register">
+          <app-icon class="ic" name="user" [size]="18" /> <span class="label">Login / Register</span>
         </a>
       }
     </div>
@@ -86,3 +116,6 @@
     <router-outlet />
   </main>
 </div>
+
+<!-- Floating support assistant: forwards questions to the support team + admin. -->
+<app-chat-widget />

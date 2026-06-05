@@ -1,10 +1,12 @@
 import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { ProductService } from '../core/product.service';
 import { AdminService } from '../core/admin.service';
 import { SupportService } from '../core/support.service';
 import { AuthService } from '../core/auth.service';
+import { NotificationService } from '../core/notification.service';
 import { IconComponent } from '../core/icon.component';
 import { SettingsService } from '../core/settings.service';
 import { formatPrice } from '../core/countries';
@@ -14,6 +16,7 @@ import {
   AdminStats,
   AdminTicket,
   AdminUser,
+  AppNotification,
   AuditEntry,
   CartItem,
   Coupon,
@@ -48,6 +51,7 @@ type Tab =
   | 'reviews'
   | 'support'
   | 'coupons'
+  | 'notifications'
   | 'security'
   | 'settings';
 
@@ -57,7 +61,7 @@ type Tab =
 @Component({
   selector: 'app-admin',
   standalone: true,
-  imports: [CommonModule, FormsModule, DatePipe, IconComponent],
+  imports: [CommonModule, FormsModule, DatePipe, RouterLink, IconComponent],
   template: `
     <div class="container admin">
       <div class="page-head">
@@ -88,6 +92,7 @@ type Tab =
         <button class="tab" [class.active]="tab() === 'listing-categories'" (click)="go('listing-categories')"><app-icon name="tag" [size]="16" /> Mkt. categories</button>
         <button class="tab" [class.active]="tab() === 'reviews'" (click)="go('reviews')"><app-icon name="star" [size]="16" /> Reviews</button>
         <button class="tab" [class.active]="tab() === 'support'" (click)="go('support')"><app-icon name="message" [size]="16" /> Support</button>
+        <button class="tab" [class.active]="tab() === 'notifications'" (click)="go('notifications')"><app-icon name="bell" [size]="16" /> Notifications @if (notif.unread() > 0) { <span class="tab-badge">{{ notif.unread() }}</span> }</button>
         <button class="tab" [class.active]="tab() === 'security'" (click)="go('security')"><app-icon name="shield" [size]="16" /> Security</button>
         <button class="tab" [class.active]="tab() === 'settings'" (click)="go('settings')"><app-icon name="settings" [size]="16" /> Settings</button>
       </div>
@@ -671,6 +676,104 @@ type Tab =
         </div>
       }
 
+      <!-- ============================ NOTIFICATIONS ============================ -->
+      @if (tab() === 'notifications') {
+        <p class="muted" style="margin-top:0">Central hub for system events sent to management — the 100 most recent.</p>
+
+        @if (nMetrics(); as m) {
+          <div class="stats" style="margin-bottom:18px">
+            <div class="card stat"><div class="n">{{ m.total }}</div><div class="l">Total (recent)</div></div>
+            <div class="card stat"><div class="n">{{ m.unread }}</div><div class="l">New / unread</div></div>
+            <div class="card stat"><div class="n">{{ m.alerts }}</div><div class="l">Alerts</div></div>
+            <div class="card stat"><div class="n">{{ m.read }}</div><div class="l">Read</div></div>
+            <div class="card stat"><div class="n">{{ m.today }}</div><div class="l">Today</div></div>
+          </div>
+        }
+
+        <div class="n-analytics">
+          <div class="card pad">
+            <h3 style="margin-top:0">By category</h3>
+            @for (c of nCategories(); track c.kind) {
+              <button class="n-cat-row" (click)="nCat.set(c.kind)" [class.sel]="nCat() === c.kind">
+                <app-icon [name]="categoryIcon(c.kind)" [size]="16" class="muted" />
+                <span class="cl">{{ categoryLabel(c.kind) }}</span>
+                <span class="bar"><span [style.width.%]="c.count / (nMetrics().total || 1) * 100"></span></span>
+                <span class="cn">{{ c.count }}</span>
+              </button>
+            } @empty { <p class="muted" style="margin:0">No notifications yet.</p> }
+          </div>
+          <div class="card pad">
+            <h3 style="margin-top:0">Daily volume (7 days)</h3>
+            <div class="n-spark">
+              @for (d of nByDay(); track d.day) {
+                <div class="col" [title]="d.n + ' on ' + d.label">
+                  <div class="b" [style.height.%]="d.n / nMaxDay() * 100"></div>
+                  <span class="v">{{ d.n }}</span>
+                  <span class="lbl">{{ d.label }}</span>
+                </div>
+              }
+            </div>
+          </div>
+        </div>
+
+        <div class="n-toolbar">
+          <input class="n-search" type="search" placeholder="Search notifications…" [ngModel]="nSearch()" (ngModelChange)="nSearch.set($event)" />
+          <select [ngModel]="nCat()" (ngModelChange)="nCat.set($event)">
+            <option value="all">All categories</option>
+            @for (c of nCategories(); track c.kind) { <option [value]="c.kind">{{ categoryLabel(c.kind) }}</option> }
+          </select>
+          <button class="btn ghost sm" (click)="markAllNotif()" [disabled]="notif.unread() === 0">Mark all read</button>
+        </div>
+
+        <div class="card" style="padding:6px 20px">
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Time</th><th>Notification</th><th>Category</th><th>Priority</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                @for (n of nFiltered(); track n.id) {
+                  <tr [class.unreadrow]="!n.read">
+                    <td style="white-space:nowrap">{{ n.created_at | date: 'MMM d, h:mm a' }}</td>
+                    <td>
+                      <strong>{{ n.title }}</strong>
+                      @if (n.body) { <br /><span class="muted" style="font-size:.82rem">{{ n.body }}</span> }
+                    </td>
+                    <td><span class="tag cat"><app-icon [name]="categoryIcon(n.kind)" [size]="13" /> {{ categoryLabel(n.kind) }}</span></td>
+                    <td><span class="tag" [ngClass]="'sev-' + severity(n)">{{ severityLabel(severity(n)) }}</span></td>
+                    <td><span class="tag" [ngClass]="n.read ? 'status-cancelled' : 'status-paid'">{{ notifStatus(n) }}</span></td>
+                    <td class="row" style="gap:6px;justify-content:flex-end">
+                      <button class="btn ghost sm" (click)="viewNotif(n)">Details</button>
+                      @if (!n.read) { <button class="btn ghost sm" (click)="markNotif(n)">Mark read</button> }
+                      @if (n.link) { <a class="btn ghost sm" [routerLink]="n.link">View</a> }
+                    </td>
+                  </tr>
+                } @empty { <tr><td colspan="6" class="muted center" style="padding:30px">No notifications match your filters.</td></tr> }
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Detail view: read the full notification before acting on it. -->
+        @if (selectedNotif(); as n) {
+          <div class="n-modal-scrim" (click)="closeNotif()"></div>
+          <div class="n-modal card" role="dialog" aria-label="Notification details">
+            <div class="n-modal-head">
+              <span class="tag cat"><app-icon [name]="categoryIcon(n.kind)" [size]="13" /> {{ categoryLabel(n.kind) }}</span>
+              <span class="tag" [ngClass]="'sev-' + severity(n)">{{ severityLabel(severity(n)) }}</span>
+              <span class="tag" [ngClass]="n.read ? 'status-cancelled' : 'status-paid'">{{ notifStatus(n) }}</span>
+              <button class="n-modal-close" (click)="closeNotif()" aria-label="Close"><app-icon name="x" [size]="18" /></button>
+            </div>
+            <h3>{{ n.title }}</h3>
+            <p class="muted" style="margin:0 0 12px;font-size:.82rem">{{ n.created_at | date: 'full' }}</p>
+            <p class="n-modal-body">{{ n.body || 'No additional details for this notification.' }}</p>
+            <div class="row" style="gap:8px;margin-top:18px;flex-wrap:wrap">
+              @if (!n.read) { <button class="btn" (click)="markNotif(n); closeNotif()">Mark as read</button> }
+              @if (n.link) { <a class="btn ghost" [routerLink]="n.link" (click)="closeNotif()">Open related page</a> }
+              <button class="btn ghost" (click)="closeNotif()">Close</button>
+            </div>
+          </div>
+        }
+      }
+
       <!-- ============================ SECURITY ============================ -->
       @if (tab() === 'security') {
         <p class="muted" style="margin-top:0">Audit trail of admin actions and logins — most recent first.</p>
@@ -770,9 +873,9 @@ type Tab =
 
      .stat { display:flex; align-items:center; gap:14px; }
      .stat .ico { width:42px; height:42px; flex:none; border-radius:11px; display:flex; align-items:center; justify-content:center; }
-     .stat .ico.brand { background:#eef2ff; color:var(--brand); }
-     .stat .ico.accent { background:#ecfdf5; color:var(--accent); }
-     .stat .ico.danger { background:#fef2f2; color:var(--danger); }
+     .stat .ico.brand { background:var(--tint-brand); color:var(--brand); }
+     .stat .ico.accent { background:var(--tint-accent); color:var(--accent); }
+     .stat .ico.danger { background:var(--tint-danger); color:var(--danger); }
      .stat .n { font-size:1.45rem; font-weight:800; line-height:1.1; }
      .stat .l { color:var(--muted); font-size:.8rem; }
 
@@ -805,17 +908,17 @@ type Tab =
      .low-stock { color:var(--warn); font-weight:700; }
      .out-stock { color:var(--danger); font-weight:700; }
 
-     .tag.you { background:#eef2ff; color:var(--brand); margin-left:6px; }
-     .tag.role-admin { background:#eef2ff; color:var(--brand); }
+     .tag.you { background:var(--tint-brand); color:var(--brand); margin-left:6px; }
+     .tag.role-admin { background:var(--tint-brand); color:var(--brand); }
      .tag.role-cust { background:var(--bg); color:var(--muted); }
 
      /* Order lifecycle pills */
      .tag.status-paid       { background:#eff6ff; color:#1d4ed8; }
      .tag.status-processing { background:#fffbeb; color:#b45309; }
-     .tag.status-shipped    { background:#eef2ff; color:#4338ca; }
-     .tag.status-delivered  { background:#ecfdf5; color:#047857; }
+     .tag.status-shipped    { background:var(--tint-brand); color:#4338ca; }
+     .tag.status-delivered  { background:var(--tint-accent); color:#047857; }
      .tag.status-cancelled  { background:#f3f4f6; color:#6b7280; }
-     .tag.status-refunded   { background:#fef2f2; color:#b91c1c; }
+     .tag.status-refunded   { background:var(--tint-danger); color:#b91c1c; }
 
      .icon-only { padding:4px 6px; }
      .detail-row > td { background:var(--bg); padding:0 16px 14px; }
@@ -852,14 +955,44 @@ type Tab =
      .uploader img { width:100%; max-height:180px; object-fit:cover; border-radius:12px; border:1px solid var(--border); display:block; }
      .remove-img { position:absolute; top:10px; right:10px; width:30px; height:30px; padding:0; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; border:none; border-radius:999px; background:rgba(16,24,40,.65); color:#fff; }
 
-     tr.sel { background:#eef2ff; }
+     tr.sel { background:var(--tint-brand); }
      .thread { display:flex; flex-direction:column; gap:10px; max-height:420px; overflow-y:auto; }
      .thread .msg { display:flex; }
      .thread .msg.staff { justify-content:flex-end; }
      .thread .bubble { max-width:80%; background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:9px 13px; }
-     .thread .msg.staff .bubble { background:#eef2ff; border-color:#dbe3ff; }
+     .thread .msg.staff .bubble { background:var(--tint-brand); border-color:var(--tint-brand); }
      .thread .bubble .who { font-size:.76rem; font-weight:600; margin-bottom:3px; }
-     .thread .bubble p { margin:0; white-space:pre-wrap; }`,
+     .thread .bubble p { margin:0; white-space:pre-wrap; }
+     /* Notifications dashboard */
+     .tab-badge { background:var(--danger); color:#fff; border-radius:999px; font-size:.66rem; font-weight:700; padding:0 6px; margin-left:2px; }
+     .n-analytics { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:18px; }
+     @media (max-width:760px){ .n-analytics { grid-template-columns:1fr; } }
+     .n-cat-row { display:flex; align-items:center; gap:10px; width:100%; background:none; border:none; cursor:pointer; padding:7px 0; font:inherit; color:var(--ink); }
+     .n-cat-row .cl { width:96px; flex:none; text-align:left; font-weight:600; font-size:.88rem; }
+     .n-cat-row .bar { flex:1; height:8px; border-radius:999px; background:var(--bg); overflow:hidden; }
+     .n-cat-row .bar > span { display:block; height:100%; background:var(--brand); border-radius:999px; }
+     .n-cat-row .cn { flex:none; width:32px; text-align:right; font-weight:700; font-size:.86rem; }
+     .n-cat-row.sel .cl { color:var(--brand); }
+     .n-spark { display:flex; align-items:flex-end; gap:8px; height:130px; }
+     .n-spark .col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px; height:100%; }
+     .n-spark .b { width:60%; min-height:3px; background:var(--brand); border-radius:6px 6px 0 0; transition:height .2s ease; }
+     .n-spark .v { font-size:.74rem; font-weight:700; }
+     .n-spark .lbl { font-size:.7rem; color:var(--muted); }
+     .n-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
+     .n-toolbar .n-search { flex:1; min-width:220px; }
+     .n-toolbar select { width:auto; min-width:160px; }
+     .tag.cat { background:var(--tint-brand); color:var(--brand); display:inline-flex; align-items:center; gap:4px; }
+     .tag.sev-critical { background:#fef2f2; color:#b91c1c; }
+     .tag.sev-warning { background:#fffbeb; color:#b45309; }
+     .tag.sev-info { background:var(--tint-accent); color:#047857; }
+     tr.unreadrow td { background:color-mix(in srgb, var(--brand) 6%, transparent); }
+     .n-modal-scrim { position:fixed; inset:0; background:rgba(16,24,40,.5); z-index:90; }
+     .n-modal { position:fixed; z-index:91; top:50%; left:50%; transform:translate(-50%,-50%); width:min(520px, calc(100vw - 32px)); padding:22px; max-height:calc(100vh - 64px); overflow-y:auto; }
+     .n-modal-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+     .n-modal-close { margin-left:auto; border:none; background:none; color:var(--muted); cursor:pointer; padding:4px; display:inline-flex; }
+     .n-modal-close:hover { color:var(--ink); }
+     .n-modal h3 { margin:0 0 4px; font-size:1.15rem; }
+     .n-modal-body { margin:0; white-space:pre-wrap; line-height:1.6; color:var(--ink); }`,
   ],
 })
 export class AdminComponent implements OnInit {
@@ -953,11 +1086,72 @@ export class AdminComponent implements OnInit {
     this.lowOnly() ? this.products().filter((p) => p.stock <= 10) : this.products()
   );
 
+  // ---- notifications dashboard ----
+  // Source data is the admin's own notification feed (populated for every
+  // management event via notifyManagement on the API). Capped at the 100 most
+  // recent, so totals reflect that recent window; the unread count is exact.
+  nSearch = signal('');
+  nCat = signal<string>('all'); // 'all' or a notification kind
+  selectedNotif = signal<AppNotification | null>(null);
+
+  // Headline metrics, all derived from the loaded feed.
+  readonly nMetrics = computed(() => {
+    const items = this.notif.items();
+    const today = new Date().toDateString();
+    const isToday = (ts: string) => new Date(ts).toDateString() === today;
+    return {
+      total: items.length,
+      unread: this.notif.unread(),
+      read: items.filter((n) => n.read).length,
+      today: items.filter((n) => isToday(n.created_at)).length,
+      alerts: items.filter((n) => this.severity(n) !== 'info').length,
+    };
+  });
+
+  // Count per category (notification kind), newest-window.
+  readonly nCategories = computed(() => {
+    const counts = new Map<string, number>();
+    for (const n of this.notif.items()) counts.set(n.kind, (counts.get(n.kind) ?? 0) + 1);
+    return [...counts.entries()]
+      .map(([kind, count]) => ({ kind, count }))
+      .sort((a, b) => b.count - a.count);
+  });
+
+  // Feed after category filter + search.
+  readonly nFiltered = computed(() => {
+    const q = this.nSearch().trim().toLowerCase();
+    const cat = this.nCat();
+    return this.notif.items().filter((n) => {
+      if (cat !== 'all' && n.kind !== cat) return false;
+      if (q && !(`${n.title} ${n.body}`.toLowerCase().includes(q))) return false;
+      return true;
+    });
+  });
+
+  // Daily volume for the last 7 days (oldest → newest) for the analytics bars.
+  readonly nByDay = computed(() => {
+    const days: { day: string; label: string; n: number }[] = [];
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      days.push({ day: d.toDateString(), label: d.toLocaleDateString(undefined, { weekday: 'short' }), n: 0 });
+    }
+    for (const n of this.notif.items()) {
+      const key = new Date(n.created_at).toDateString();
+      const slot = days.find((x) => x.day === key);
+      if (slot) slot.n++;
+    }
+    return days;
+  });
+  readonly nMaxDay = computed(() => Math.max(1, ...this.nByDay().map((d) => d.n)));
+
   constructor(
     private productSvc: ProductService,
     private admin: AdminService,
     private support: SupportService,
     private settingsSvc: SettingsService,
+    public notif: NotificationService,
     public auth: AuthService
   ) {}
 
@@ -975,6 +1169,7 @@ export class AdminComponent implements OnInit {
     if (tab === 'listings' && this.listings().length === 0) this.loadListings();
     if (tab === 'listing-categories') this.loadListingCategories();
     if (tab === 'security') this.loadAudit();
+    if (tab === 'notifications') this.notif.refresh(100);
     if (tab === 'coupons') this.loadCoupons();
     if (tab === 'settings') this.loadSettings();
     if (tab === 'reviews') this.loadReviews();
@@ -999,6 +1194,70 @@ export class AdminComponent implements OnInit {
 
   roleCount(role: Role): number {
     return this.stats()?.roleCounts?.[role] ?? this.users().filter((u) => u.role === role).length;
+  }
+
+  // ---- notifications helpers ----
+  // Inferred display severity. There's no stored priority yet, so this is a
+  // transparent keyword heuristic over the title/body — enough to surface the
+  // alerts that need attention without inventing a backend field.
+  severity(n: AppNotification): 'critical' | 'warning' | 'info' {
+    const t = `${n.title} ${n.body}`.toLowerCase();
+    if (/(fail|failed|declined|suspicious|error|down|fraud|breach|cancel)/.test(t)) return 'critical';
+    if (/(low|warning|pending|return|refund|out of stock|overdue|retry)/.test(t)) return 'warning';
+    return 'info';
+  }
+  severityLabel(s: string): string {
+    return { critical: 'Critical', warning: 'Warning', info: 'Info' }[s] ?? s;
+  }
+  // Friendly category label for a notification kind.
+  categoryLabel(kind: string): string {
+    return (
+      {
+        order: 'Orders',
+        return: 'Returns',
+        support: 'Support',
+        payment: 'Payments',
+        inventory: 'Inventory',
+        user: 'Employees',
+        security: 'Security',
+        system: 'System',
+      }[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1)
+    );
+  }
+  categoryIcon(kind: string): string {
+    return (
+      {
+        order: 'orders',
+        return: 'return',
+        support: 'message',
+        payment: 'card',
+        inventory: 'box',
+        user: 'user',
+        security: 'shield',
+        system: 'settings',
+      }[kind] ?? 'bell'
+    );
+  }
+  // Status shown in the feed: read vs new.
+  notifStatus(n: AppNotification): string {
+    return n.read ? 'read' : 'new';
+  }
+  // Open the full notification in a detail panel so it can be read before acting.
+  viewNotif(n: AppNotification): void {
+    this.selectedNotif.set(n);
+  }
+  closeNotif(): void {
+    this.selectedNotif.set(null);
+  }
+  markNotif(n: AppNotification): void {
+    if (n.read) return;
+    this.notif.markRead(n.id).subscribe({ error: () => {} });
+  }
+  markAllNotif(): void {
+    this.notif.markAllRead().subscribe({
+      next: () => this.flash('All notifications marked as read'),
+      error: () => this.error.set('Could not mark all as read'),
+    });
   }
 
   barHeight(revenue: number): number {

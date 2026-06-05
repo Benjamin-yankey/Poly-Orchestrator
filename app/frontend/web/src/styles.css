@@ -14,6 +14,33 @@
   --warn: #f59e0b;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 8px 24px rgba(16, 24, 40, 0.06);
   --radius: 14px;
+  /* Soft tinted surfaces used by stat icons, selected rows, chat bubbles, etc.
+     Defined as variables so the dark theme can re-tint them in one place. */
+  --tint-brand: #eef2ff;
+  --tint-accent: #ecfdf5;
+  --tint-danger: #fef2f2;
+}
+
+/* ---------- Dark theme ---------- */
+/* Applied via data-theme="dark" on <html> (set pre-paint in index.html and
+   managed by ThemeService). Re-tints the shared variables so every component
+   that uses them flips automatically; a few hardcoded pills are fixed below. */
+:root[data-theme='dark'] {
+  --bg: #0e1320;
+  --surface: #161c2c;
+  --ink: #e7eaf2;
+  --muted: #98a2b8;
+  --border: #283349;
+  --brand: #818cf8;
+  --brand-dark: #6f7bf7;
+  --accent: #34d399;
+  --danger: #fb7185;
+  --warn: #fbbf24;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px rgba(0, 0, 0, 0.45);
+  --tint-brand: #20264a;
+  --tint-accent: #103127;
+  --tint-danger: #3a1d24;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -65,13 +92,17 @@ a:hover { text-decoration: underline; }
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border: 1px solid transparent; border-radius: 10px; padding: 10px 16px;
   font-weight: 700; font-size: 0.92rem; cursor: pointer; transition: all .15s ease;
-  background: var(--brand); color: #fff;
+  background: var(--brand); color: #fff; white-space: nowrap;
 }
 .btn:hover { background: var(--brand-dark); }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
 .btn.ghost { background: transparent; color: var(--brand); border-color: var(--border); }
 .btn.ghost:hover { background: var(--bg); }
-.btn.danger { background: var(--danger); }
+.btn.danger { background: var(--danger); color: #fff; }
+/* Ghost + danger = an outline button (transparent fill, red text/border), not a
+   solid red fill. Higher specificity than .btn.danger so it wins the background. */
+.btn.ghost.danger { background: transparent; color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.btn.ghost.danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
 .btn.success { background: var(--accent); }
 .btn.block { width: 100%; }
 .btn.sm { padding: 6px 12px; font-size: 0.84rem; }
@@ -174,6 +205,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand); bor
 .alert.error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 .alert.ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
 .alert.info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+:root[data-theme='dark'] .alert.error { background: #3a1d24; color: #fecdd3; border-color: #7f2d3b; }
+:root[data-theme='dark'] .alert.ok { background: #103127; color: #a7f3d0; border-color: #1f5f4a; }
+:root[data-theme='dark'] .alert.info { background: #1b2540; color: #bfd3ff; border-color: #2e4480; }
 
 /* ---------- Tables ---------- */
 table { width: 100%; border-collapse: collapse; }
@@ -235,3 +269,33 @@ th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-
 @media (max-width: 380px) {
   .grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- Guided tour (driver.js) ---------- */
+/* Match the popover to the app surfaces so it reads correctly in both themes,
+   and give the primary action the brand colour. */
+.driver-popover {
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.driver-popover-title { color: var(--ink); font-weight: 800; }
+.driver-popover-description { color: var(--muted); }
+.driver-popover-progress-text { color: var(--muted); }
+.driver-popover-arrow { border-color: var(--surface); }
+.driver-popover .driver-popover-next-btn,
+.driver-popover .driver-popover-prev-btn {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-shadow: none;
+  font-weight: 600;
+}
+.driver-popover .driver-popover-next-btn {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+}
+.driver-popover .driver-popover-next-btn:hover { background: var(--brand-dark); }
+.driver-popover .driver-popover-close-btn { color: var(--muted); }

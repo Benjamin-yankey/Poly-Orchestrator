@@ -66,10 +66,10 @@ import { formatPrice } from '../core/countries';
                 <span><app-icon name="user" [size]="14" /> {{ l.seller_name || 'Seller' }}</span>
                 @if (l.location) { <span><app-icon name="location" [size]="14" /> {{ l.location }}{{ l.country ? ', ' + l.country : '' }}</span> }
               </div>
-              <div class="row spread" style="margin-top:12px">
+              <div class="buy-row">
                 <span class="price">{{ price(l) }}</span>
-                <a class="btn sm success" [href]="'tel:' + l.phone" title="Call the seller" (click)="$event.stopPropagation()">
-                  <app-icon name="phone" [size]="14" /> {{ l.phone }}
+                <a class="btn sm success call-btn" [href]="'tel:' + l.phone" [title]="'Call ' + l.phone" (click)="$event.stopPropagation()">
+                  <app-icon name="phone" [size]="14" /> <span class="num">{{ l.phone }}</span>
                 </a>
               </div>
             </div>
@@ -87,7 +87,20 @@ import { formatPrice } from '../core/countries';
      .media img { width:100%; height:100%; object-fit:cover; }
      .seller { display:flex; flex-wrap:wrap; gap:12px; font-size:0.82rem; }
      .seller span { display:inline-flex; align-items:center; gap:4px; }
-     a.btn.sm { display:inline-flex; align-items:center; gap:5px; text-decoration:none; }`,
+     /* Price + call button. The price keeps its width; the call button takes the
+        rest and truncates a long/odd phone number with an ellipsis instead of
+        overflowing the card. Wraps to two lines only when truly out of room. */
+     .buy-row {
+       display:flex; align-items:center; justify-content:space-between;
+       gap:10px; flex-wrap:wrap; margin-top:12px;
+     }
+     .buy-row .price { flex:none; }
+     a.btn.sm.call-btn {
+       display:inline-flex; align-items:center; gap:5px; text-decoration:none;
+       min-width:0; max-width:100%; flex:0 1 auto;
+     }
+     a.btn.sm.call-btn .num { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+     a.btn.sm.call-btn app-icon { flex:none; }`,
   ],
 })
 export class MarketplaceComponent implements OnInit {
