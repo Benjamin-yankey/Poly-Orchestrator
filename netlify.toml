@@ -79,3 +79,13 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# ----------------------------------------------------------------------------
+# Headers. Google Identity Services opens a popup and calls window.postMessage;
+# a strict Cross-Origin-Opener-Policy blocks that. "same-origin-allow-popups"
+# keeps the page isolated but lets the Google sign-in popup talk back.
+# ----------------------------------------------------------------------------
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"

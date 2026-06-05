@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, effect, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, signal, untracked } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet, Router } from '@angular/router';
 import { AuthService } from './core/auth.service';
 import { CartService } from './core/cart.service';
@@ -47,15 +47,21 @@ export class AppComponent implements OnInit {
     // Whenever the logged-in user changes, sync per-user state: load the cart,
     // wishlist and notifications on login, empty the in-memory copies on logout.
     effect(() => {
-      if (this.auth.isLoggedIn()) {
-        this.cart.refresh();
-        this.wishlist.refresh();
-        this.notif.refresh();
-      } else {
-        this.cart.reset();
-        this.wishlist.reset();
-        this.notif.reset();
-      }
+      const loggedIn = this.auth.isLoggedIn();
+      // These calls write other services' signals. Run them untracked so the
+      // writes aren't attributed to this reactive context / the change-detection
+      // pass that scheduled the effect (avoids NG0600).
+      untracked(() => {
+        if (loggedIn) {
+          this.cart.refresh();
+          this.wishlist.refresh();
+          this.notif.refresh();
+        } else {
+          this.cart.reset();
+          this.wishlist.reset();
+          this.notif.reset();
+        }
+      });
     });
   }
 
