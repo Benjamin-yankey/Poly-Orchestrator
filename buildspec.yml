@@ -26,7 +26,8 @@ phases:
       - ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
       - ECR=$ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
       # Immutable, traceable tag = short commit SHA (falls back to "latest").
-      - TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}; TAG=${TAG:0:7}
+      # POSIX sh (CodeBuild's shell) has no ${VAR:0:7} substring — use cut.
+      - TAG=$(echo "${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}" | cut -c1-7)
       - echo "Registry=$ECR  tag=$TAG"
       - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
   build:
