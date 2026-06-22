@@ -43,3 +43,30 @@ variable "jwt_secret" {
   default     = "shopnow_dev_secret_change_me"
   sensitive   = true
 }
+
+# ---- CI/CD (AWS CodePipeline + CodeBuild) ----
+# Off by default so the core infra applies without a GitHub connection. Turn on
+# with: terraform apply -var enable_cicd=true
+variable "enable_cicd" {
+  description = "Create the CodePipeline + CodeBuild CI/CD stack"
+  type        = bool
+  default     = false
+}
+
+variable "github_owner" {
+  description = "GitHub org/user that owns the repo (for the pipeline source)"
+  type        = string
+  default     = "Benjamin-yankey"
+}
+
+variable "github_repo" {
+  description = "GitHub repository name (for the pipeline source)"
+  type        = string
+  default     = "Poly-Orchestrator"
+}
+
+variable "github_branch" {
+  description = "Branch the pipeline builds from"
+  type        = string
+  default     = "main"
+}

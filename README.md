@@ -70,13 +70,12 @@ are the only things that differ between environments:
 │   ├── products/        # Products/core API (Postgres: catalog, users, orders)
 │   └── cart/            # Cart microservice (Redis: per-user carts) + Dockerfile
 ├── docker-compose.yml   # run the whole stack locally
-├── terraform/           # VPC + ECR + ECS stack + EKS cluster (one apply)
-│   ├── vpc.tf  ecr.tf  ecs.tf  eks.tf  variables.tf  outputs.tf
+├── buildspec.yml        # CI build steps (build → push to ECR → deploy)
+├── terraform/           # VPC + ECR + ECS + EKS + CI/CD (one apply)
+│   ├── vpc.tf  ecr.tf  ecs.tf  eks.tf  cicd.tf  variables.tf  outputs.tf
 ├── eks/                 # Kubernetes manifests (Deployments/Services/Ingress)
-├── Jenkinsfile          # CI/CD: build → push to ECR → deploy ECS + EKS
-├── ci/                  # IAM policy for the Jenkins deploy role
 └── docs/
-    └── CICD-JENKINS.md  # Jenkins pipeline setup guide
+    └── CICD-CODEPIPELINE.md  # CodePipeline + CodeBuild setup guide
 ```
 
 ---
@@ -195,9 +194,11 @@ done
 ```
 
 > 🤖 **Tired of doing this on every change?** Steps 3–5 (build → push → redeploy
-> ECS + EKS) are automated in [`/Jenkinsfile`](Jenkinsfile). After a one-time
-> setup, every `git push` ships your changes to both clusters. See
-> [docs/CICD-JENKINS.md](docs/CICD-JENKINS.md).
+> ECS + EKS) are automated with **AWS CodePipeline + CodeBuild** ([`buildspec.yml`](buildspec.yml)
+> + [`terraform/cicd.tf`](terraform/cicd.tf)). After a one-time setup, every
+> `git push` ships your changes. See [docs/CICD-CODEPIPELINE.md](docs/CICD-CODEPIPELINE.md).
+> CodeBuild also builds on native x86, which avoids local Docker push issues on
+> Apple Silicon.
 
 ---
 

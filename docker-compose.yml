@@ -30,7 +30,7 @@ services:
       retries: 10
 
   # Adminer — web UI to browse/edit the Postgres data at http://localhost:8082
-  # (Host 8080 is Jenkins, 8081 is the frontend.) Log in with:
+  # (8081 is the frontend.) Log in with:
   #   System: PostgreSQL · Server: postgres · User: shopnow · Password: shopnow_pass · DB: shopnow
   adminer:
     image: adminer:4
@@ -75,7 +75,7 @@ services:
       PRODUCTS_URL: http://products:5001
       CART_URL: http://cart:5002
     ports:
-      # Host 8081 -> container 8080. Host 8080 is reserved for Jenkins.
+      # Host 8081 -> container 8080 (8080 left free for other local tooling).
       - "8081:8080"
     depends_on:
       - products

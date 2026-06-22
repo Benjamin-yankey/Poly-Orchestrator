@@ -1,0 +1,65 @@
+# ShopNow CI — build the 3 service images, push to ECR, redeploy ECS (and
+# optionally EKS). Used by the CodeBuild project that CodePipeline drives on
+# every push. See docs/CICD-CODEPIPELINE.md.
+#
+# DOCKER_BUILDKIT=0 forces the legacy builder -> a plain single-arch image that
+# pushes to ECR cleanly. (BuildKit's default provenance/SBOM attestations create
+# a multi-manifest index that can hang on push.) CodeBuild runs on native x86, so
+# no --platform / emulation is needed.
+
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: us-east-1
+    ECR_NAMESPACE: shopnow
+    ECS_CLUSTER: shopnow-ecs
+    # Flip to "true" to also roll the EKS Deployments (needs the CodeBuild role to
+    # have an EKS access entry — see docs/CICD-CODEPIPELINE.md).
+    DEPLOY_EKS: "false"
+    EKS_CLUSTER: shopnow-eks
+    K8S_NAMESPACE: shopnow
+
+phases:
+  pre_build:
+    commands:
+      - ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+      - ECR=$ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
+      # Immutable, traceable tag = short commit SHA (falls back to "latest").
+      - TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}; TAG=${TAG:0:7}
+      - echo "Registry=$ECR  tag=$TAG"
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
+  build:
+    commands:
+      - |
+        for svc in frontend products cart; do
+          echo "=== build $svc ==="
+          DOCKER_BUILDKIT=0 docker build \
+            -t $ECR/$ECR_NAMESPACE/$svc:$TAG \
+            -t $ECR/$ECR_NAMESPACE/$svc:latest \
+            ./app/$svc
+          echo "=== push $svc ==="
+          docker push $ECR/$ECR_NAMESPACE/$svc:$TAG
+          docker push $ECR/$ECR_NAMESPACE/$svc:latest
+        done
+  post_build:
+    commands:
+      - |
+        echo "=== deploy ECS (force new deployment, rolling) ==="
+        for s in frontend products cart; do
+          aws ecs update-service --cluster $ECS_CLUSTER --service $s \
+            --force-new-deployment --region $AWS_REGION >/dev/null && echo "ECS redeploy: $s"
+        done
+      - |
+        if [ "$DEPLOY_EKS" = "true" ]; then
+          echo "=== deploy EKS (pin Deployments to the SHA tag) ==="
+          curl -sLO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl && mv kubectl /usr/local/bin/kubectl
+          aws eks update-kubeconfig --name $EKS_CLUSTER --region $AWS_REGION
+          for s in frontend products cart; do
+            kubectl -n $K8S_NAMESPACE set image deployment/$s $s=$ECR/$ECR_NAMESPACE/$s:$TAG
+            kubectl -n $K8S_NAMESPACE rollout status deployment/$s --timeout=180s
+          done
+        else
+          echo "DEPLOY_EKS=false — skipping EKS"
+        fi

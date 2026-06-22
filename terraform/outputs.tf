@@ -27,3 +27,14 @@ output "eks_kubeconfig_command" {
   description = "Run this to point kubectl at the new cluster"
   value       = var.enable_eks ? "aws eks update-kubeconfig --region ${var.region} --name ${module.eks[0].cluster_name}" : null
 }
+
+# ---- CI/CD ----
+output "cicd_connection_arn" {
+  description = "Authorize this GitHub connection once (console → Developer Tools → Connections) before the pipeline can run"
+  value       = var.enable_cicd ? aws_codestarconnections_connection.github[0].arn : null
+}
+
+output "cicd_pipeline_name" {
+  description = "CodePipeline name"
+  value       = var.enable_cicd ? aws_codepipeline.shopnow[0].name : null
+}
