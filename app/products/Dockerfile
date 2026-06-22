@@ -1,6 +1,10 @@
 # ---- ShopNow Products service image ----
 FROM node:20-alpine
 
+# Patch base-image OS packages (e.g. openssl/libssl3/libcrypto3) to the latest
+# Alpine security fixes — clears the ECR scan's OpenSSL CVEs (3.5.6-r0 -> 3.5.7-r0).
+RUN apk upgrade --no-cache
+
 WORKDIR /usr/src/app
 
 COPY package.json ./
