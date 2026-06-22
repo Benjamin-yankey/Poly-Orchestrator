@@ -30,6 +30,11 @@ phases:
       - TAG=$(echo "${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}" | cut -c1-7)
       - echo "Registry=$ECR  tag=$TAG"
       - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR
+      # Pull the base image from ECR Public (Docker Hub's rate-limit-free mirror)
+      # and tag it locally, so the Dockerfiles' `FROM node:20-alpine` never hits
+      # Docker Hub's unauthenticated pull limit on CodeBuild's shared IPs.
+      - docker pull public.ecr.aws/docker/library/node:20-alpine
+      - docker tag public.ecr.aws/docker/library/node:20-alpine node:20-alpine
   build:
     commands:
       - |
