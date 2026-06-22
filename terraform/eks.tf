@@ -31,10 +31,13 @@ module "eks" {
     }
   }
 
+  # Core networking/DNS addons only. The EBS CSI driver was intentionally removed:
+  # it requires an IRSA-backed IAM role to reach ACTIVE, and nothing here uses an
+  # EBS-backed PersistentVolume (Postgres/Redis use ephemeral emptyDir for the demo).
+  # If you later add a PVC, re-add aws-ebs-csi-driver WITH a service_account_role_arn.
   cluster_addons = {
-    coredns            = {}
-    kube-proxy         = {}
-    vpc-cni            = {}
-    aws-ebs-csi-driver = {}
+    coredns    = {}
+    kube-proxy = {}
+    vpc-cni    = {}
   }
 }
